@@ -169,6 +169,9 @@ AutoTest.Net/
 # Web workbench (sass)
 .sass-cache/
 
+# ASP.NET runtime data
+src/Engine.Server/App_Data/
+
 # Installshield output folder
 [Ee]xpress/
 
