@@ -1,0 +1,538 @@
+@page "/devtools"
+@using System.Globalization
+@using System.Text.Json
+@inject DeveloperToolsClient DevTools
+
+<PageTitle>Developer Tools</PageTitle>
+
+<main class="devtools-grid">
+    <section class="panel dev-panel">
+        <header>
+            <div>
+                <p>Module Browser</p>
+                <small>Inspect live subsystems</small>
+            </div>
+            <button class="ghost" @onclick="LoadAsync" disabled="@_refreshing">Reload</button>
+        </header>
+        <input class="dev-search" placeholder="Filter modules" @bind="_moduleFilter" @bind:event="oninput"/>
+        <ul class="dev-module-list">
+            @foreach (var module in FilterModules())
+            {
+                var isActive = _selectedModule?.Name == module.Name;
+                <li class="@(isActive ? "active" : string.Empty)" @onclick="async () => await SelectModuleAsync(module.Name)">
+                    <strong>@module.Name</strong>
+                    <small>@module.Description ?? "No description provided"</small>
+                    <span>@module.Version</span>
+                </li>
+            }
+        </ul>
+    </section>
+
+    <section class="panel dev-panel span-2">
+        <header>
+            <div>
+                <p>Property Inspector</p>
+                <small>@(_selectedModule?.Name ?? "Select a module")</small>
+            </div>
+        </header>
+        @if (_selectedModule is null)
+        {
+            <p class="dev-placeholder">Pick a module to introspect runtime state.</p>
+        }
+        else
+        {
+            @foreach (var group in GroupProperties(_selectedModule))
+            {
+                <div class="dev-prop-group">
+                    <h4>@group.Key</h4>
+                    @foreach (var property in group)
+                    {
+                        <div class="dev-prop">
+                            <div class="dev-prop__meta">
+                                <strong>@property.Label</strong>
+                                <small>@property.Description</small>
+                                <em>@property.Type</em>
+                            </div>
+                            <input value="@GetPropertyDraft(property.Name)" @onchange="args => SetPropertyDraft(property.Name, args.Value?.ToString() ?? string.Empty)"/>
+                            <button @onclick="async () => await UpdatePropertyAsync(property)" disabled="@_refreshing">Push</button>
+                        </div>
+                    }
+                </div>
+            }
+        }
+    </section>
+
+    <section class="panel dev-panel span-2">
+        <header>
+            <div>
+                <p>Diagnostics Telemetry</p>
+                <small>Sample data emitted by Diagnostics module</small>
+            </div>
+            <button class="ghost" @onclick="SampleDiagnosticsAsync" disabled="@_samplingDiagnostics">Sample noise</button>
+        </header>
+        <p class="dev-placeholder">@_diagnosticsStatus</p>
+        @if (_diagnosticSamples.Count == 0)
+        {
+            <p class="dev-placeholder">No telemetry captured yet.</p>
+        }
+        else
+        {
+            <ul class="dev-telemetry">
+                @foreach (var sample in _diagnosticSamples)
+                {
+                    <li>@sample.ToString("0.###", CultureInfo.InvariantCulture)</li>
+                }
+            </ul>
+        }
+    </section>
+
+    <section class="panel dev-panel span-2">
+        <header>
+            <div>
+                <p>Command Console</p>
+                <small>Run module commands & queries</small>
+            </div>
+        </header>
+        @if (_selectedModule is null)
+        {
+            <p class="dev-placeholder">Select a module to unlock console access.</p>
+        }
+        else
+        {
+            <div class="dev-command">
+                <label>Command</label>
+                <select @bind="_selectedCommand">
+                    <option value="">Choose command</option>
+                    @foreach (var command in _selectedModule.Commands)
+                    {
+                        <option value="@command.Name">@command.Name (@(command.IsQuery ? "query" : "action"))</option>
+                    }
+                </select>
+            </div>
+            <div class="dev-command">
+                <label>Parameters (JSON)</label>
+                <textarea rows="5" @bind="_commandPayload"></textarea>
+                <small>@DescribeSelectedCommand()</small>
+            </div>
+            <div class="form-actions">
+                <button @onclick="ExecuteCommandAsync" disabled="@(_selectedModule is null || string.IsNullOrWhiteSpace(_selectedCommand) || _refreshing)">Execute</button>
+                <button class="ghost" @onclick="ResetConsole" type="button">Reset</button>
+            </div>
+            <pre class="dev-console-output">@_consoleOutput</pre>
+        }
+    </section>
+
+    <section class="panel dev-panel">
+        <header>
+            <div>
+                <p>Autocomplete & Profiles</p>
+                <small>Global overview + sandbox state</small>
+            </div>
+        </header>
+        <div class="dev-command">
+            <label>Autocomplete tokens</label>
+            <input class="dev-search" placeholder="Type to filter" @bind="_autocompleteFilter" @bind:event="oninput"/>
+            <ul class="dev-autocomplete">
+                @foreach (var entry in FilterAutocomplete())
+                {
+                    <li>
+                        <strong>@entry.Token</strong>
+                        <small>@entry.Kind</small>
+                        <span>@entry.Source</span>
+                    </li>
+                }
+            </ul>
+        </div>
+        <div class="dev-command">
+            <label>Profiles</label>
+            <div class="dev-profiles">
+                <div>
+                    <select @onchange="ProfileSelectChanged">
+                        <option value="">Load profile</option>
+                        @foreach (var profile in _profiles)
+                        {
+                            <option value="@profile.Id">@profile.Id (@profile.LastUpdated.ToLocalTime().ToShortTimeString())</option>
+                        }
+                    </select>
+                </div>
+                <input placeholder="Profile Id" @bind="_profileId"/>
+                <textarea rows="4" @bind="_profileJson"></textarea>
+                <div class="form-actions">
+                    <button @onclick="SaveProfileAsync" disabled="@_refreshing">Save profile</button>
+                </div>
+            </div>
+        </div>
+    </section>
+</main>
+
+@code {
+    private readonly Dictionary<string, string> _propertyDrafts = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<DeveloperModuleDescriptor> _modules = Array.Empty<DeveloperModuleDescriptor>();
+    private IReadOnlyList<DeveloperAutocompleteEntry> _autocomplete = Array.Empty<DeveloperAutocompleteEntry>();
+    private IReadOnlyList<DeveloperProfile> _profiles = Array.Empty<DeveloperProfile>();
+    private DeveloperModuleDescriptor? _selectedModule;
+    private string _moduleFilter = string.Empty;
+    private string _autocompleteFilter = string.Empty;
+    private string? _selectedCommand;
+    private string _commandPayload = "{}";
+    private string _consoleOutput = "Awaiting commands.";
+    private string _profileId = "sandbox-local";
+    private string _profileJson = "{\n  \"notes\": \"\"\n}";
+    private IReadOnlyList<double> _diagnosticSamples = Array.Empty<double>();
+    private string _diagnosticsStatus = "Awaiting diagnostics sample.";
+    private bool _samplingDiagnostics;
+    private bool _refreshing;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (_refreshing)
+        {
+            return;
+        }
+
+        _refreshing = true;
+        try
+        {
+            var modulesTask = DevTools.ListModulesAsync();
+            var autocompleteTask = DevTools.GetAutocompleteAsync();
+            var profilesTask = DevTools.ListProfilesAsync();
+            await Task.WhenAll(modulesTask, autocompleteTask, profilesTask).ConfigureAwait(false);
+
+            _modules = modulesTask.Result.ToArray();
+            _autocomplete = autocompleteTask.Result.ToArray();
+            _profiles = profilesTask.Result.ToArray();
+
+            _selectedModule ??= _modules.FirstOrDefault();
+            if (_selectedModule is not null)
+            {
+                await SelectModuleAsync(_selectedModule.Name);
+            }
+
+            await SampleDiagnosticsAsync();
+        }
+        finally
+        {
+            _refreshing = false;
+            StateHasChanged();
+        }
+    }
+
+    private IEnumerable<DeveloperModuleDescriptor> FilterModules()
+    {
+        if (string.IsNullOrWhiteSpace(_moduleFilter))
+        {
+            return _modules;
+        }
+
+        return _modules.Where(module => module.Name.Contains(_moduleFilter, StringComparison.OrdinalIgnoreCase) ||
+                                        (module.Description?.Contains(_moduleFilter, StringComparison.OrdinalIgnoreCase) ?? false));
+    }
+
+    private IEnumerable<IGrouping<string, DeveloperInspectableProperty>> GroupProperties(DeveloperModuleDescriptor module)
+    {
+        return module.Properties
+            .GroupBy(property => string.IsNullOrWhiteSpace(property.Group) ? "General" : property.Group!)
+            .OrderBy(group => group.Key);
+    }
+
+    private string GetPropertyDraft(string propertyName)
+    {
+        if (_propertyDrafts.TryGetValue(propertyName, out var value))
+        {
+            return value;
+        }
+
+        var current = _selectedModule?.Properties.FirstOrDefault(property => property.Name == propertyName)?.Value;
+        var formatted = FormatValue(current);
+        _propertyDrafts[propertyName] = formatted;
+        return formatted;
+    }
+
+    private void SetPropertyDraft(string propertyName, string value)
+    {
+        _propertyDrafts[propertyName] = value;
+    }
+
+    private static string FormatValue(object? value)
+    {
+        if (value is null)
+        {
+            return string.Empty;
+        }
+
+        return value switch
+        {
+            double d => d.ToString("0.###", CultureInfo.InvariantCulture),
+            float f => f.ToString("0.###", CultureInfo.InvariantCulture),
+            decimal m => m.ToString(CultureInfo.InvariantCulture),
+            bool b => b ? "true" : "false",
+            _ => value.ToString() ?? string.Empty
+        };
+    }
+
+    private async Task SelectModuleAsync(string moduleName)
+    {
+        _refreshing = true;
+        try
+        {
+            var descriptor = await DevTools.GetModuleAsync(moduleName).ConfigureAwait(false);
+            _selectedModule = descriptor;
+            _modules = _modules.Select(module => module.Name == descriptor.Name ? descriptor : module).ToArray();
+            _propertyDrafts.Clear();
+            foreach (var property in descriptor.Properties)
+            {
+                _propertyDrafts[property.Name] = FormatValue(property.Value);
+            }
+
+            _selectedCommand = descriptor.Commands.FirstOrDefault()?.Name;
+            _commandPayload = "{}";
+        }
+        finally
+        {
+            _refreshing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task UpdatePropertyAsync(DeveloperInspectableProperty property)
+    {
+        if (_selectedModule is null)
+        {
+            return;
+        }
+
+        if (!_propertyDrafts.TryGetValue(property.Name, out var draft))
+        {
+            return;
+        }
+
+        try
+        {
+            var value = ParseDraft(property.Type, draft);
+            await DevTools.UpdatePropertyAsync(_selectedModule.Name, property.Name, value).ConfigureAwait(false);
+            await SelectModuleAsync(_selectedModule.Name);
+        }
+        catch (Exception ex)
+        {
+            _consoleOutput = $"Property update failed: {ex.Message}";
+        }
+    }
+
+    private static object? ParseDraft(string propertyType, string draft)
+    {
+        if (string.IsNullOrWhiteSpace(draft))
+        {
+            return null;
+        }
+
+        var typeName = propertyType.ToLowerInvariant();
+        return typeName switch
+        {
+            "double" or "float" => double.Parse(draft, CultureInfo.InvariantCulture),
+            "int32" or "int64" or "int" => long.Parse(draft, CultureInfo.InvariantCulture),
+            "decimal" => decimal.Parse(draft, CultureInfo.InvariantCulture),
+            "boolean" or "bool" => bool.Parse(draft),
+            _ => draft
+        };
+    }
+
+    private string DescribeSelectedCommand()
+    {
+        if (_selectedModule is null || string.IsNullOrWhiteSpace(_selectedCommand))
+        {
+            return "";
+        }
+
+        var command = _selectedModule.Commands.FirstOrDefault(cmd => cmd.Name == _selectedCommand);
+        if (command is null)
+        {
+            return string.Empty;
+        }
+
+        var parameters = string.Join(", ", command.Parameters.Select(param => $"{param.Name}:{param.Type}"));
+        return string.IsNullOrWhiteSpace(parameters) ? "No parameters" : parameters;
+    }
+
+    private void ResetConsole()
+    {
+        _commandPayload = "{}";
+        _consoleOutput = "Awaiting commands.";
+    }
+
+    private async Task ExecuteCommandAsync()
+    {
+        if (_selectedModule is null || string.IsNullOrWhiteSpace(_selectedCommand))
+        {
+            return;
+        }
+
+        try
+        {
+            IReadOnlyDictionary<string, object?>? parameters = null;
+            if (!string.IsNullOrWhiteSpace(_commandPayload) && _commandPayload.Trim() != "{}")
+            {
+                parameters = JsonSerializer.Deserialize<Dictionary<string, object?>>(_commandPayload, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            }
+
+            var result = await DevTools.ExecuteCommandAsync(_selectedModule.Name, _selectedCommand, parameters).ConfigureAwait(false);
+            _consoleOutput = JsonSerializer.Serialize(result.Result, new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                WriteIndented = true
+            });
+            await SelectModuleAsync(_selectedModule.Name);
+        }
+        catch (Exception ex)
+        {
+            _consoleOutput = $"Command failed: {ex.Message}";
+        }
+    }
+
+    private async Task SampleDiagnosticsAsync()
+    {
+        if (_samplingDiagnostics)
+        {
+            return;
+        }
+
+        _samplingDiagnostics = true;
+        try
+        {
+            var parameters = new Dictionary<string, object?> { ["samples"] = 24 };
+            var result = await DevTools.ExecuteCommandAsync("Diagnostics", "generate-noise", parameters).ConfigureAwait(false);
+            var samples = ExtractSamples(result.Result);
+            if (samples.Count > 0)
+            {
+                _diagnosticSamples = samples;
+                _diagnosticsStatus = $"Captured {_diagnosticSamples.Count} samples at {DateTimeOffset.Now:HH:mm:ss}.";
+            }
+            else
+            {
+                _diagnosticSamples = Array.Empty<double>();
+                _diagnosticsStatus = "Diagnostics returned no samples.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _diagnosticsStatus = $"Diagnostics failed: {ex.Message}";
+        }
+        finally
+        {
+            _samplingDiagnostics = false;
+            StateHasChanged();
+        }
+    }
+
+    private static IReadOnlyList<double> ExtractSamples(object? payload)
+    {
+        if (payload is JsonElement element && element.ValueKind == JsonValueKind.Array)
+        {
+            var list = new List<double>();
+            foreach (var item in element.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.Number && item.TryGetDouble(out var value))
+                {
+                    list.Add(value);
+                }
+            }
+
+            return list;
+        }
+
+        if (payload is IEnumerable<double> typed)
+        {
+            return typed.ToArray();
+        }
+
+        if (payload is IEnumerable<object?> raw)
+        {
+            var list = new List<double>();
+            foreach (var item in raw)
+            {
+                if (item is JsonElement wrapped && wrapped.ValueKind == JsonValueKind.Number &&
+                    wrapped.TryGetDouble(out var wrappedValue))
+                {
+                    list.Add(wrappedValue);
+                }
+                else if (item is IConvertible convertible &&
+                         double.TryParse(convertible.ToString(CultureInfo.InvariantCulture), NumberStyles.Any,
+                             CultureInfo.InvariantCulture, out var converted))
+                {
+                    list.Add(converted);
+                }
+            }
+
+            return list;
+        }
+
+        if (payload is JsonElement singleElement && singleElement.ValueKind == JsonValueKind.Number &&
+            singleElement.TryGetDouble(out var singleValue))
+        {
+            return new[] { singleValue };
+        }
+
+        if (payload is double singleDouble)
+        {
+            return new[] { singleDouble };
+        }
+
+        return Array.Empty<double>();
+    }
+
+    private IEnumerable<DeveloperAutocompleteEntry> FilterAutocomplete()
+    {
+        if (string.IsNullOrWhiteSpace(_autocompleteFilter))
+        {
+            return _autocomplete.Take(20);
+        }
+
+        return _autocomplete
+            .Where(entry => entry.Token.Contains(_autocompleteFilter, StringComparison.OrdinalIgnoreCase))
+            .Take(20);
+    }
+
+    private async Task SaveProfileAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_profileId))
+        {
+            return;
+        }
+
+        try
+        {
+            var state = JsonSerializer.Deserialize<Dictionary<string, string>>(_profileJson, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? new Dictionary<string, string>();
+            var profile = await DevTools.UpsertProfileAsync(_profileId, state).ConfigureAwait(false);
+            _profiles = _profiles.Where(p => p.Id != profile.Id).Append(profile).OrderByDescending(p => p.LastUpdated).ToArray();
+        }
+        catch (Exception ex)
+        {
+            _consoleOutput = $"Profile save failed: {ex.Message}";
+        }
+    }
+
+    private void ProfileSelectChanged(ChangeEventArgs args)
+    {
+        var selected = args.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(selected))
+        {
+            return;
+        }
+
+        var profile = _profiles.FirstOrDefault(p => string.Equals(p.Id, selected, StringComparison.OrdinalIgnoreCase));
+        if (profile is null)
+        {
+            return;
+        }
+
+        _profileId = profile.Id;
+        _profileJson = JsonSerializer.Serialize(profile.State, new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            WriteIndented = true
+        });
+    }
+
+}

@@ -1,0 +1,556 @@
+﻿@page "/"
+@inject GraphicsSettingsClient GraphicsClient
+@inject LeaderboardClient LeaderboardClient
+@inject SessionClient SessionClient
+@inject RenderLoopService RenderLoop
+@inject AccountClient AccountClient
+@inject IJSRuntime JsRuntime
+
+@implements IAsyncDisposable
+
+<PageTitle>Mission Control</PageTitle>
+
+<main class="dashboard-grid">
+	<section class="panel span-2">
+		<header>
+			<div>
+				<p>Simulation View</p>
+				<small>@_currentSettings.TargetFps fps · @_currentSettings.GpuTier</small>
+			</div>
+			<span>@_playerId</span>
+		</header>
+		<canvas class="render-surface" @ref="_canvasRef" width="512" height="512" aria-label="GPU preview"></canvas>
+		<footer>
+			<button class="ghost" @onclick="RefreshAllAsync">Refresh telemetry</button>
+		</footer>
+	</section>
+
+	<section class="panel span-2 account-hub">
+		<header>
+			<div>
+				<p>Account Hangar</p>
+				<small>Launch multi-life pilots with default loadouts</small>
+			</div>
+			<span>@(_user?.DisplayName ?? "Provisioning...")</span>
+		</header>
+		@if (_user is null)
+		{
+			<p class="account-placeholder">Provisioning pilot identity and syncing hangars...</p>
+		}
+		else
+		{
+			<div class="account-hub__grid">
+				<div class="account-column">
+					<h3>Hangars</h3>
+					<div class="account-chips">
+						@foreach (var account in _accounts)
+						{
+							var active = _selectedAccount?.Id == account.Id;
+							<button type="button" class=@$"account-chip{(active ? " active" : string.Empty)}" @onclick="() => SelectAccountAsync(account)">
+								<strong>@account.Label</strong>
+								<small>@account.CreatedAt.ToLocalTime().ToString("MMM d · HH:mm")</small>
+							</button>
+						}
+						@if (_accounts.Count == 0)
+						{
+							<p class="account-placeholder">No hangars yet. Create one to mint your first New Life.</p>
+						}
+					</div>
+					<div class="form-inline account-form">
+						<input type="text" maxlength="32" @bind="_accountLabelDraft" placeholder="Hangar label" />
+						<button type="button" @onclick="CreateUserAccountAsync" disabled="@_accountBusy">Launch hangar</button>
+					</div>
+					@if (!string.IsNullOrWhiteSpace(_accountError))
+					{
+						<p class="account-error">@_accountError</p>
+					}
+				</div>
+				<div class="account-column">
+					<h3>New Life Profiles</h3>
+					<div class="profile-grid">
+						@if (_selectedAccount is null)
+						{
+							<p class="account-placeholder">Select a hangar to view its lives.</p>
+						}
+						else if (_profiles.Count == 0)
+						{
+							<p class="account-placeholder">No lives minted yet. Launch a new one to receive starter gear.</p>
+						}
+						else
+						{
+							@foreach (var profile in _profiles)
+							{
+								<article class="profile-card">
+									<img src="@ResolveSprite(profile.SpriteAssetId)" alt="@profile.Name artwork" />
+									<div class="profile-card__header">
+										<strong>@profile.Name</strong>
+										<small>@profile.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")</small>
+									</div>
+									<ul class="profile-economy">
+										<li>
+											<span>Base</span>
+											<strong>@profile.BaseCurrency.ToString("N0")</strong>
+										</li>
+										<li>
+											<span>Shards</span>
+											<strong>@profile.PremiumCurrency.ToString("N0")</strong>
+										</li>
+									</ul>
+									<div class="equipment-grid">
+										@foreach (var slot in EnumerateEquipment(profile.Equipment))
+										{
+											<span>
+												<em>@slot.Label</em>
+												@slot.Value
+											</span>
+										}
+									</div>
+								</article>
+							}
+						}
+					</div>
+					<div class="form-inline account-form">
+						<input type="text" maxlength="32" @bind="_profileNameDraft" placeholder="New Life codename" />
+						<button type="button" @onclick="CreateProfileAsync" disabled="@(_accountBusy || _selectedAccount is null)">Launch New Life</button>
+					</div>
+				</div>
+			</div>
+		}
+	</section>
+
+	<section class="panel">
+		<header>
+			<div>
+				<p>Graphics Controls</p>
+				<small>GPU tier tuning & pixel density</small>
+			</div>
+		</header>
+		<EditForm Model="_graphicsDraft" OnValidSubmit="ApplyGraphicsAsync">
+			<div class="form-grid">
+				<label>Target FPS</label>
+				<InputNumber @bind-Value="_graphicsDraft.TargetFps" min="30" max="240" />
+
+				<label>Resolution Scale</label>
+				<InputNumber @bind-Value="_graphicsDraft.ResolutionScale" step="0.1" min="0.25" max="2.5" />
+
+				<label>Particle Density</label>
+				<InputNumber @bind-Value="_graphicsDraft.ParticleDensity" min="0" max="100" />
+
+				<label>Sprite Smoothing</label>
+				<InputCheckbox @bind-Value="_graphicsDraft.SpriteSmoothing" />
+
+				<label>GPU Tier</label>
+				<InputSelect @bind-Value="_graphicsDraft.GpuTier">
+					<option value="tier1">Tier 1 · Low power</option>
+					<option value="tier2">Tier 2 · Balanced</option>
+					<option value="tier3">Tier 3 · Performance</option>
+				</InputSelect>
+			</div>
+			<div class="form-actions">
+				<button type="submit" disabled="@_busy">Apply</button>
+				<button type="button" class="ghost" @onclick="ResetGraphics" disabled="@_busy">Reset</button>
+			</div>
+		</EditForm>
+	</section>
+
+	<section class="panel">
+		<header>
+			<div>
+				<p>Global Leaderboard</p>
+				<small>Real-time scores pushed via SignalR</small>
+			</div>
+			<button class="ghost" @onclick="RefreshLeaderboardAsync">Sync</button>
+		</header>
+		<ol class="leaderboard">
+			@foreach (var (entry, index) in _leaderboard.Select((value, index) => (value, index)))
+			{
+				<li>
+					<span>@(index + 1).</span>
+					<strong>@entry.DisplayName</strong>
+					<em>@entry.Score.ToString("N0")</em>
+				</li>
+			}
+		</ol>
+		<div class="form-inline">
+			<input type="number" min="0" @bind="_pendingScore" />
+			<button @onclick="SubmitScoreAsync">Submit score</button>
+		</div>
+	</section>
+
+	<section class="panel">
+		<header>
+			<div>
+				<p>Multiplayer Sessions</p>
+				<small>Authoritative instancing overview</small>
+			</div>
+			<button class="ghost" @onclick="RefreshSessionsAsync">Refresh</button>
+		</header>
+		<ul class="session-list">
+			@foreach (var session in _sessions)
+			{
+				<li>
+					<div>
+						<strong>@session.Name</strong>
+						<small>@session.PlayerCount players</small>
+					</div>
+					<button @onclick="async () => await JoinSessionAsync(session.Id)">Join</button>
+				</li>
+			}
+		</ul>
+		<div class="form-inline">
+			<input type="text" maxlength="24" @bind="_newSessionName" />
+			<button @onclick="CreateSessionAsync">Spawn session</button>
+		</div>
+	</section>
+</main>
+
+@code {
+	private RenderSettings _currentSettings = RenderSettings.Balanced;
+	private RenderSettingsDraft _graphicsDraft = RenderSettingsDraft.From(RenderSettings.Balanced);
+	private IReadOnlyList<LeaderboardEntry> _leaderboard = Array.Empty<LeaderboardEntry>();
+	private IReadOnlyList<SessionDescriptor> _sessions = Array.Empty<SessionDescriptor>();
+	private IReadOnlyList<AccountRecord> _accounts = Array.Empty<AccountRecord>();
+	private IReadOnlyList<CharacterProfileRecord> _profiles = Array.Empty<CharacterProfileRecord>();
+	private AccountRecord? _selectedAccount;
+	private UserRecord? _user;
+	private string _accountLabelDraft = "Starborn Vault";
+	private string _profileNameDraft = "New Life";
+	private string _newSessionName = "Echo Node";
+	private string _playerId = GeneratePilotId();
+	private double _pendingScore = 1000;
+	private bool _busy;
+	private bool _accountBusy;
+	private string? _accountError;
+	private ElementReference _canvasRef;
+	private bool _renderReady;
+
+	private static readonly IReadOnlyDictionary<string, string> SpriteLibrary =
+		new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+		{
+			["avatars/ember-nomad"] = "images/avatars/ember-nomad.svg"
+		};
+
+	protected override async Task OnInitializedAsync()
+	{
+		_playerId = GeneratePilotId();
+		await EnsureUserAsync();
+		await RefreshAllAsync();
+	}
+
+	private static string GeneratePilotId()
+	{
+		var raw = Guid.NewGuid().ToString("N");
+		return $"pilot-{raw[..6]}";
+	}
+
+	protected override async Task OnAfterRenderAsync(bool firstRender)
+	{
+		if (firstRender && _renderReady)
+		{
+			await RenderLoop.InitializeAsync(_canvasRef, _currentSettings);
+		}
+	}
+
+	private async Task RefreshAllAsync()
+	{
+		await EnsureUserAsync();
+		_busy = true;
+		var graphicsTask = GraphicsClient.GetAsync();
+		var leaderboardTask = LeaderboardClient.GetAsync();
+		var sessionsTask = SessionClient.ListAsync();
+		var accountsTask = RefreshAccountDataAsync();
+
+		_currentSettings = await graphicsTask;
+		_graphicsDraft = RenderSettingsDraft.From(_currentSettings);
+		_leaderboard = await leaderboardTask;
+		_sessions = await sessionsTask;
+		await accountsTask;
+
+		_busy = false;
+		_renderReady = true;
+		StateHasChanged();
+	}
+
+	private async Task ApplyGraphicsAsync()
+	{
+		if (_busy)
+		{
+			return;
+		}
+
+		_busy = true;
+		var updated = _graphicsDraft.ToRenderSettings();
+		_currentSettings = await GraphicsClient.UpdateAsync(updated);
+		await RenderLoop.UpdateSettingsAsync(_currentSettings);
+		_busy = false;
+	}
+
+	private void ResetGraphics()
+	{
+		_graphicsDraft = RenderSettingsDraft.From(RenderSettings.Balanced);
+	}
+
+	private async Task EnsureUserAsync()
+	{
+		if (_user is not null)
+		{
+			return;
+		}
+
+		string? storedId = null;
+		try
+		{
+			storedId = await JsRuntime.InvokeAsync<string?>("localStorage.getItem", "afk.userId");
+		}
+		catch
+		{
+			// Storage unavailable; proceed with a fresh identity.
+		}
+
+		if (!string.IsNullOrWhiteSpace(storedId))
+		{
+			try
+			{
+				var existing = await AccountClient.GetUserAsync(storedId);
+				if (existing is not null)
+				{
+					_user = existing;
+					return;
+				}
+			}
+			catch (AccountClientException ex)
+			{
+				_accountError ??= ex.Message;
+			}
+		}
+
+		try
+		{
+			var suffix = Guid.NewGuid().ToString("N")[..6];
+			var alias = $"wanderer-{suffix}";
+			var created = await AccountClient.CreateUserAsync(alias);
+			_user = created;
+			await PersistUserIdAsync(created.Id);
+			_accountError = null;
+		}
+		catch (AccountClientException ex)
+		{
+			_accountError = ex.Message;
+		}
+	}
+
+	private async Task PersistUserIdAsync(string userId)
+	{
+		try
+		{
+			await JsRuntime.InvokeVoidAsync("localStorage.setItem", "afk.userId", userId);
+		}
+		catch
+		{
+			// Ignore persistence errors; the UI will simply reprovision later.
+		}
+	}
+
+	private async Task RefreshAccountDataAsync()
+	{
+		if (_user is null)
+		{
+			_accounts = Array.Empty<AccountRecord>();
+			_profiles = Array.Empty<CharacterProfileRecord>();
+			return;
+		}
+
+		try
+		{
+			var accounts = await AccountClient.GetAccountsAsync(_user.Id);
+			_accounts = accounts;
+			if (_selectedAccount is null || !_accounts.Any(a => a.Id == _selectedAccount.Id))
+			{
+				_selectedAccount = _accounts.FirstOrDefault();
+			}
+
+			if (_selectedAccount is not null)
+			{
+				_profiles = await AccountClient.GetProfilesAsync(_selectedAccount.Id);
+			}
+			else
+			{
+				_profiles = Array.Empty<CharacterProfileRecord>();
+			}
+
+			_accountError = null;
+		}
+		catch (AccountClientException ex)
+		{
+			_accountError = ex.Message;
+			_profiles = Array.Empty<CharacterProfileRecord>();
+		}
+	}
+
+	private async Task SelectAccountAsync(AccountRecord account)
+	{
+		if (_selectedAccount?.Id == account.Id)
+		{
+			return;
+		}
+
+		_selectedAccount = account;
+		await LoadProfilesForSelectionAsync();
+	}
+
+	private async Task LoadProfilesForSelectionAsync()
+	{
+		if (_selectedAccount is null)
+		{
+			_profiles = Array.Empty<CharacterProfileRecord>();
+			return;
+		}
+
+		try
+		{
+			_profiles = await AccountClient.GetProfilesAsync(_selectedAccount.Id);
+			_accountError = null;
+		}
+		catch (AccountClientException ex)
+		{
+			_accountError = ex.Message;
+		}
+	}
+
+	private async Task CreateUserAccountAsync()
+	{
+		if (_user is null || _accountBusy)
+		{
+			return;
+		}
+
+		_accountBusy = true;
+		try
+		{
+			var label = string.IsNullOrWhiteSpace(_accountLabelDraft)
+				? $"Hangar {_accounts.Count + 1}"
+				: _accountLabelDraft.Trim();
+			var account = await AccountClient.CreateAccountAsync(_user.Id, label);
+			_selectedAccount = account;
+			_accountLabelDraft = string.Empty;
+			await RefreshAccountDataAsync();
+		}
+		catch (AccountClientException ex)
+		{
+			_accountError = ex.Message;
+		}
+		finally
+		{
+			_accountBusy = false;
+		}
+	}
+
+	private async Task CreateProfileAsync()
+	{
+		if (_selectedAccount is null || _accountBusy)
+		{
+			return;
+		}
+
+		_accountBusy = true;
+		try
+		{
+			var name = string.IsNullOrWhiteSpace(_profileNameDraft) ? null : _profileNameDraft.Trim();
+			await AccountClient.CreateProfileAsync(_selectedAccount.Id, name);
+			_profileNameDraft = "New Life";
+			await LoadProfilesForSelectionAsync();
+		}
+		catch (AccountClientException ex)
+		{
+			_accountError = ex.Message;
+		}
+		finally
+		{
+			_accountBusy = false;
+		}
+	}
+
+	private async Task RefreshLeaderboardAsync()
+	{
+		_leaderboard = await LeaderboardClient.GetAsync();
+	}
+
+	private async Task SubmitScoreAsync()
+	{
+		var score = Math.Max(0, _pendingScore);
+		await LeaderboardClient.SubmitAsync(_playerId, _playerId, score);
+		await RefreshLeaderboardAsync();
+	}
+
+	private async Task RefreshSessionsAsync()
+	{
+		_sessions = await SessionClient.ListAsync();
+	}
+
+	private async Task CreateSessionAsync()
+	{
+		if (string.IsNullOrWhiteSpace(_newSessionName))
+		{
+			_newSessionName = "Untitled Node";
+		}
+
+		await SessionClient.CreateAsync(_newSessionName);
+		await RefreshSessionsAsync();
+	}
+
+	private async Task JoinSessionAsync(string sessionId)
+	{
+		await SessionClient.JoinAsync(sessionId, _playerId);
+		await RefreshSessionsAsync();
+	}
+
+	public async ValueTask DisposeAsync()
+	{
+		await RenderLoop.DisposeAsync();
+	}
+
+	private static IEnumerable<(string Label, string Value)> EnumerateEquipment(EquipmentSlots equipment)
+	{
+		yield return ("Head", SlotValue(equipment.Head));
+		yield return ("Cape", SlotValue(equipment.Cape));
+		yield return ("Neck", SlotValue(equipment.Neck));
+		yield return ("Weapon", SlotValue(equipment.Weapon));
+		yield return ("Shield", SlotValue(equipment.Shield));
+		yield return ("Body", SlotValue(equipment.Body));
+		yield return ("Legs", SlotValue(equipment.Legs));
+		yield return ("Feet", SlotValue(equipment.Feet));
+		yield return ("Hands", SlotValue(equipment.Hands));
+	}
+
+	private static string SlotValue(string? slot) => string.IsNullOrWhiteSpace(slot) ? "—" : slot!;
+
+	private static string ResolveSprite(string? spriteId)
+	{
+		if (!string.IsNullOrWhiteSpace(spriteId) && SpriteLibrary.TryGetValue(spriteId, out var value))
+		{
+			return value;
+		}
+
+		return SpriteLibrary["avatars/ember-nomad"];
+	}
+
+	private sealed class RenderSettingsDraft
+	{
+		public int TargetFps { get; set; }
+		public double ResolutionScale { get; set; }
+		public int ParticleDensity { get; set; }
+		public bool SpriteSmoothing { get; set; }
+		public string GpuTier { get; set; } = "tier2";
+
+		public RenderSettings ToRenderSettings() => new(TargetFps, ResolutionScale, SpriteSmoothing, ParticleDensity, GpuTier);
+
+		public static RenderSettingsDraft From(RenderSettings settings) => new()
+		{
+			TargetFps = settings.TargetFps,
+			ResolutionScale = settings.ResolutionScale,
+			ParticleDensity = settings.ParticleDensity,
+			SpriteSmoothing = settings.SpriteSmoothing,
+			GpuTier = settings.GpuTier
+		};
+	}
+}

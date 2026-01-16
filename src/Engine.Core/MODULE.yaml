@@ -1,0 +1,20 @@
+name: IncrementalEngine.Core
+version: 0.1.0
+exports:
+  - TickScheduler
+  - ResourceGraph
+  - AssetManifest
+  - RenderSettings
+  - LeaderboardService
+  - MultiplayerSessionService
+  - AccountRulebook
+  - AccountService
+  - AccountsModule
+telemetry:
+  - engine.tick.duration
+  - engine.render.settings
+  - engine.multiplayer.sessions
+  - engine.accounts.new-life
+requires:
+  - Microsoft.Extensions.Hosting
+  - Microsoft.Extensions.Logging
