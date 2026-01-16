@@ -35,6 +35,9 @@
 - **Updating profiles**: Use the Profiles panel to export/import JSON fragments for different layout presets. Because the store persists to disk, you can check the resulting file into source control when you want to share defaults with the team.
 - **Extending modules**: When you add a new system, decorate relevant properties with `ModuleInspectableAttribute` and commands with `ModuleCommandAttribute`. If the module implements `IModuleDescriptorSource`, it will automatically appear in the module browser after the host restarts.
 
+## Repository Tooling
+- **Sequence editor helper**: Keep `sequence-editor.ps1` in the repo root and point `GIT_SEQUENCE_EDITOR` at it (e.g., `Set-Item Env:GIT_SEQUENCE_EDITOR "powershell -NoProfile -File \"$PWD\sequence-editor.ps1\""`). The script re-labels the first four `pick` entries in an interactive rebase as `reword`, which removes pager friction when rewriting the bootstrap commits to match the TODO ledger format. Clear the env var when you go back to standard rebases.
+
 ## Account Hangar & New Life Profiles
 - **Mission Control panel**: The dashboard now includes an *Account Hangar* panel that provisions a pilot identity, lists every “hangar” (account), and surfaces all “New Life” character profiles with starter currencies and loadouts. The client stores the `userId` in `localStorage` so refreshes reuse the same identity.
 - **Developer module**: `AccountModule` exposes limits and currency grants in `/devtools`. Adjust `MaxAccountsPerUser`, `MaxProfilesPerAccount`, base/premium grants, or swap the starter sprite without touching code. The module also registers the `avatars/ember-nomad` sprite in the shared `AssetManifest` so tooling and the Blazor UI stay in sync.
