@@ -46,7 +46,7 @@
 						@foreach (var account in _accounts)
 						{
 							var active = _selectedAccount?.Id == account.Id;
-							<button type="button" class=@$"account-chip{(active ? " active" : string.Empty)}" @onclick="() => SelectAccountAsync(account)">
+								<button type="button" class="@BuildAccountChipClass(active)" @onclick="() => SelectAccountAsync(account)">
 								<strong>@account.Label</strong>
 								<small>@account.CreatedAt.ToLocalTime().ToString("MMM d · HH:mm")</small>
 							</button>
@@ -533,6 +533,8 @@
 
 		return SpriteLibrary["avatars/ember-nomad"];
 	}
+
+	private static string BuildAccountChipClass(bool isActive) => isActive ? "account-chip active" : "account-chip";
 
 	private sealed class RenderSettingsDraft
 	{

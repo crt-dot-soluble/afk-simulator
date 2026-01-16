@@ -1,7 +1,7 @@
 namespace Engine.Server.Models;
 
-public sealed record CreateUserRequest(string DisplayName);
+internal sealed record CreateUserRequest(string DisplayName);
 
-public sealed record CreateAccountRequest(string Label);
+internal sealed record CreateAccountRequest(string Label);
 
-public sealed record CreateProfileRequest(string? Name, string? SpriteAssetId);
+internal sealed record CreateProfileRequest(string? Name, string? SpriteAssetId);

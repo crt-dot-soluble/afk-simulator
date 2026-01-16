@@ -1,4 +1,5 @@
-﻿using Engine.Core;
+﻿using System.Collections.Generic;
+using Engine.Core;
 using Engine.Core.Accounts;
 using Engine.Core.Contracts;
 using Engine.Core.DeveloperTools;
@@ -67,8 +68,12 @@ developer.MapPost("/modules/{moduleName}/properties/{propertyName}", async (stri
 developer.MapPost("/modules/{moduleName}/commands/{commandName}", async (string moduleName, string commandName,
     DeveloperCommandRequest request, IModuleExplorer explorer, CancellationToken token) =>
 {
-    IReadOnlyDictionary<string, object?>? parameters =
-        request.Parameters?.ToDictionary(static kvp => kvp.Key, static kvp => (object?)kvp.Value);
+    IReadOnlyDictionary<string, object?>? parameters = null;
+    if (request.Parameters is { Count: > 0 })
+    {
+        parameters = request.Parameters.ToDictionary(static kvp => kvp.Key, static kvp => (object?)kvp.Value);
+    }
+
     var response = await explorer.ExecuteAsync(moduleName, commandName, parameters, token).ConfigureAwait(false);
     return Results.Ok(new DeveloperCommandResult(response));
 });
@@ -76,7 +81,12 @@ developer.MapGet("/autocomplete", (IModuleExplorer explorer) => Results.Ok(explo
 developer.MapGet("/profiles", (DeveloperProfileStore profiles) => Results.Ok(profiles.List()));
 developer.MapPost("/profiles",
     (DeveloperProfileUpsertRequest request, DeveloperProfileStore profiles) =>
-        Results.Ok(profiles.Upsert(request.Id, request.State)));
+    {
+        var payload = request.State is null
+            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(request.State, StringComparer.OrdinalIgnoreCase);
+        return Results.Ok(profiles.Upsert(request.Id, payload));
+    });
 
 var accountsApi = app.MapGroup("/accounts");
 accountsApi.MapPost("/users", async (CreateUserRequest request, IAccountService accounts, CancellationToken token) =>
@@ -191,7 +201,7 @@ app.MapPost("/leaderboard", async (LeaderboardSubmission submission, ILeaderboar
 app.MapGet("/sessions", async (IMultiplayerSessionService sessions, CancellationToken token) =>
 {
     var descriptors = new List<SessionDescriptor>();
-    await foreach (var descriptor in sessions.ListSessionsAsync(token))
+    await foreach (var descriptor in sessions.ListSessionsAsync(token).ConfigureAwait(false))
     {
         descriptors.Add(descriptor);
     }

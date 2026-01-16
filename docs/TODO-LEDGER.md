@@ -48,4 +48,15 @@ ChangeLog:
 Notes:Implements pilot identities, hangar limits, and sprite-driven New Life profiles ready for future progression features.
 ```
 
+```
+ID:00000000-0000-0000-0000-000000000005
+Title:Operational launcher scripts & repo standards
+Status:InProgress
+Owner:github-actions
+Links:SPECIFICATION.MD#10|SPECIFICATION.MD#16|scripts/
+ChangeLog:
+  - 2026-01-16T00:00:00Z: Added developer/end-user launch scripts, enforced commit/branch standards, and hardened CI plus coverage expectations
+Notes:Ensures one-command local runs, deterministic CI, and machine-friendly history formatting.
+```
+
 ````

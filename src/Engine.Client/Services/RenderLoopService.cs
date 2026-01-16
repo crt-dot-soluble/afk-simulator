@@ -4,7 +4,7 @@ using Microsoft.JSInterop;
 
 namespace Engine.Client.Services;
 
-public sealed class RenderLoopService : IAsyncDisposable
+internal sealed class RenderLoopService : IAsyncDisposable
 {
     private readonly IJSRuntime _jsRuntime;
     private IJSObjectReference? _module;
@@ -16,18 +16,21 @@ public sealed class RenderLoopService : IAsyncDisposable
 
     public async Task InitializeAsync(ElementReference canvas, RenderSettings settings)
     {
-        _module ??= await _jsRuntime.InvokeAsync<IJSObjectReference>("import", "./scripts/render-host.js");
-        await _module.InvokeVoidAsync("renderHost.start", canvas, Serialize(settings));
+        ArgumentNullException.ThrowIfNull(settings);
+        _module ??= await _jsRuntime.InvokeAsync<IJSObjectReference>("import", "./scripts/render-host.js")
+            .ConfigureAwait(false);
+        await _module.InvokeVoidAsync("renderHost.start", canvas, Serialize(settings)).ConfigureAwait(false);
     }
 
     public async Task UpdateSettingsAsync(RenderSettings settings)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         if (_module is null)
         {
             return;
         }
 
-        await _module.InvokeVoidAsync("renderHost.update", Serialize(settings));
+        await _module.InvokeVoidAsync("renderHost.update", Serialize(settings)).ConfigureAwait(false);
     }
 
     private static object Serialize(RenderSettings settings) => new
@@ -43,7 +46,7 @@ public sealed class RenderLoopService : IAsyncDisposable
     {
         if (_module is not null)
         {
-            await _module.DisposeAsync();
+            await _module.DisposeAsync().ConfigureAwait(false);
         }
     }
 }

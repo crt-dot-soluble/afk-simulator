@@ -3,8 +3,8 @@ using System.Text.Json;
 
 namespace Engine.Server.Models;
 
-public sealed record DeveloperPropertyUpdateRequest(JsonElement Value);
+internal sealed record DeveloperPropertyUpdateRequest(JsonElement Value);
 
-public sealed record DeveloperCommandRequest(IReadOnlyDictionary<string, JsonElement>? Parameters);
+internal sealed record DeveloperCommandRequest(IReadOnlyDictionary<string, JsonElement>? Parameters);
 
-public sealed record DeveloperProfileUpsertRequest(string Id, IReadOnlyDictionary<string, string> State);
+internal sealed record DeveloperProfileUpsertRequest(string Id, IReadOnlyDictionary<string, string>? State);

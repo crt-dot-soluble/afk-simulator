@@ -8,7 +8,7 @@ using Microsoft.Extensions.Configuration;
 
 namespace Engine.Client.Services;
 
-public sealed class DeveloperToolsClient
+internal sealed class DeveloperToolsClient
 {
     private readonly HttpClient _http;
     private readonly string? _apiKey;
@@ -16,6 +16,8 @@ public sealed class DeveloperToolsClient
 
     public DeveloperToolsClient(HttpClient http, IConfiguration configuration)
     {
+        ArgumentNullException.ThrowIfNull(http);
+        ArgumentNullException.ThrowIfNull(configuration);
         _http = http;
         _apiKey = configuration["Developer:ApiKey"];
     }
@@ -23,14 +25,18 @@ public sealed class DeveloperToolsClient
     public async Task<IReadOnlyList<DeveloperModuleDescriptor>> ListModulesAsync(
         CancellationToken cancellationToken = default)
     {
-        var response = await SendAsync<IReadOnlyList<DeveloperModuleDescriptor>>(HttpMethod.Get, "developer/modules", null, cancellationToken).ConfigureAwait(false);
+        var response =
+            await SendAsync<IReadOnlyList<DeveloperModuleDescriptor>>(HttpMethod.Get, "developer/modules", null,
+                cancellationToken).ConfigureAwait(false);
         return response ?? Array.Empty<DeveloperModuleDescriptor>();
     }
 
     public async Task<DeveloperModuleDescriptor> GetModuleAsync(string moduleName,
         CancellationToken cancellationToken = default)
     {
-        var response = await SendAsync<DeveloperModuleDescriptor>(HttpMethod.Get, $"developer/modules/{moduleName}", null, cancellationToken).ConfigureAwait(false);
+        var response =
+            await SendAsync<DeveloperModuleDescriptor>(HttpMethod.Get, $"developer/modules/{moduleName}", null,
+                cancellationToken).ConfigureAwait(false);
         return response ?? throw new InvalidOperationException($"Module '{moduleName}' not found.");
     }
 
@@ -39,7 +45,8 @@ public sealed class DeveloperToolsClient
     {
         var payload = new { value };
         var body = await SendAsync<ModulePropertyUpdateResult>(HttpMethod.Post,
-            $"developer/modules/{moduleName}/properties/{propertyName}", payload, cancellationToken).ConfigureAwait(false);
+                $"developer/modules/{moduleName}/properties/{propertyName}", payload, cancellationToken)
+            .ConfigureAwait(false);
         return body ?? throw new InvalidOperationException("Server returned empty update payload.");
     }
 
@@ -59,25 +66,32 @@ public sealed class DeveloperToolsClient
     public async Task<IReadOnlyList<DeveloperAutocompleteEntry>> GetAutocompleteAsync(
         CancellationToken cancellationToken = default)
     {
-        var response = await SendAsync<IReadOnlyList<DeveloperAutocompleteEntry>>(HttpMethod.Get, "developer/autocomplete", null, cancellationToken).ConfigureAwait(false);
+        var response =
+            await SendAsync<IReadOnlyList<DeveloperAutocompleteEntry>>(HttpMethod.Get, "developer/autocomplete", null,
+                cancellationToken).ConfigureAwait(false);
         return response ?? Array.Empty<DeveloperAutocompleteEntry>();
     }
 
     public async Task<IReadOnlyList<DeveloperProfile>> ListProfilesAsync(CancellationToken cancellationToken = default)
     {
-        var response = await SendAsync<IReadOnlyList<DeveloperProfile>>(HttpMethod.Get, "developer/profiles", null, cancellationToken).ConfigureAwait(false);
+        var response =
+            await SendAsync<IReadOnlyList<DeveloperProfile>>(HttpMethod.Get, "developer/profiles", null,
+                cancellationToken).ConfigureAwait(false);
         return response ?? Array.Empty<DeveloperProfile>();
     }
 
     public async Task<DeveloperProfile> UpsertProfileAsync(string id, IReadOnlyDictionary<string, string> state,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(state);
         var payload = new DeveloperProfileUpsertRequest(id, state);
-        var body = await SendAsync<DeveloperProfile>(HttpMethod.Post, "developer/profiles", payload, cancellationToken).ConfigureAwait(false);
+        var body = await SendAsync<DeveloperProfile>(HttpMethod.Post, "developer/profiles", payload, cancellationToken)
+            .ConfigureAwait(false);
         return body ?? throw new InvalidOperationException("Profile upsert returned empty response.");
     }
 
-    private async Task<T?> SendAsync<T>(HttpMethod method, string uri, object? payload, CancellationToken cancellationToken)
+    private async Task<T?> SendAsync<T>(HttpMethod method, string uri, object? payload,
+        CancellationToken cancellationToken)
     {
         using var request = CreateRequest(method, uri, payload);
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);

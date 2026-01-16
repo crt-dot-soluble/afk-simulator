@@ -1,9 +1,10 @@
+using System.Collections.Generic;
 using Engine.Core.Multiplayer;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Engine.Server.Hubs;
 
-public sealed class SimulationHub : Hub
+internal sealed class SimulationHub : Hub
 {
     private readonly ILeaderboardService _leaderboardService;
 
@@ -12,8 +13,6 @@ public sealed class SimulationHub : Hub
         _leaderboardService = leaderboardService;
     }
 
-    public async Task<IReadOnlyCollection<LeaderboardEntry>> GetLeaderboardAsync(int take = 25)
-    {
-        return _leaderboardService.Snapshot(take);
-    }
+    public Task<IReadOnlyCollection<LeaderboardEntry>> GetLeaderboardAsync(int take = 25)
+        => Task.FromResult(_leaderboardService.Snapshot(take));
 }

@@ -3,7 +3,7 @@ using Engine.Core.Rendering;
 
 namespace Engine.Client.Services;
 
-public sealed class GraphicsSettingsClient
+internal sealed class GraphicsSettingsClient
 {
     private readonly HttpClient _httpClient;
 
@@ -15,14 +15,18 @@ public sealed class GraphicsSettingsClient
     public async Task<RenderSettings> GetAsync(CancellationToken cancellationToken = default)
     {
         return await _httpClient.GetFromJsonAsync<RenderSettings>("graphics/settings", cancellationToken)
+                   .ConfigureAwait(false)
                ?? RenderSettings.Balanced;
     }
 
-    public async Task<RenderSettings> UpdateAsync(RenderSettings settings, CancellationToken cancellationToken = default)
+    public async Task<RenderSettings> UpdateAsync(RenderSettings settings,
+        CancellationToken cancellationToken = default)
     {
-        var response = await _httpClient.PostAsJsonAsync("graphics/settings", settings, cancellationToken);
+        var response = await _httpClient.PostAsJsonAsync("graphics/settings", settings, cancellationToken)
+            .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<RenderSettings>(cancellationToken: cancellationToken)
+                   .ConfigureAwait(false)
                ?? settings;
     }
 }

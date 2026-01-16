@@ -103,6 +103,9 @@ Notes:<short context>
 10.3 `AI Sync Hooks`: CI step publishes ledger + spec digest to artifacts enabling agents to bootstrap context.
 10.4 `Testing Mandate`: Every feature branch must include a dedicated automated test suite (unit + integration + GPU/render snapshots as applicable) before merge; PRs without tests are blocked by policy checks.
 10.5 `Branch Health`: Feature branches may only merge when lint/analyzer, formatting, deterministic builds, and multiplayer soak tests pass; partial implementations stay isolated until all acceptance tests succeed.
+10.6 `Commit Format`: Conventional commits are mandatory. Short messages follow `type(scope): summary` (e.g., `feat(devtools): add diagnostics noise`). The commit body must inline the exact TODO Ledger block(s) associated with the change so automated agents can diff status, and the footer must reference those entries (example: `Refs: docs/TODO-LEDGER.md#ID:00000000-0000-0000-0000-000000000003`).
+10.7 `Branch Discipline`: Every effort begins on a fresh `feature/<todo-id>-<slug>` branch. Push after every logical commit to keep the remote mirror current; local-only work is prohibited because TODO ledger, CI, and reviewers depend on real-time branch availability.
+10.8 `Ledger Coupling`: When a commit touches multiple ledger IDs, include the full block for each ID in the body and annotate the footer with multiple `Refs:` lines to maintain bidirectional traceability.
 
 ## 11. AI-Augmented Development
 11.1 `Metadata`: Each module includes `MODULE.yaml` with exports, dependencies, telemetry keys for AI ingestion.
@@ -140,3 +143,8 @@ Notes:<short context>
 15.2 `Authentication`: All `/developer` HTTP endpoints require the `X-Developer-Key` header. The default root/master key for local setups is `local-dev-key`; production deployments must override via configuration or secrets storage.
 15.3 `Profiles`: Developer profiles (UI layouts, notes, sandbox state) persist to disk under `App_Data/developer-profiles.json` by default so tooling changes survive restarts. Stores must be backed up or rotated per environment policies.
 15.4 `Diagnostics Module`: At least one diagnostics-focused module (e.g., `DiagnosticsModule`) remains active to generate sample telemetry, seeded profiles, and synthetic data for verification of the developer console.
+
+## 16. Operational Tooling
+16.1 `Launch Scripts`: The `scripts/run_developer.(ps1|sh)` helpers boot Engine.Server and Engine.Client together, open both Mission Control and `/devtools`, and clean up host processes on exit. They infer the repo root automatically and honor `NO_BROWSER=1` or the `-NoBrowser` switch.
+16.2 `End-User Flows`: The `scripts/run.(ps1|sh)` pair mirrors the production experience (Mission Control only) and shares the same cleanup semantics so QA and stakeholders can launch validated builds with one command.
+16.3 `Parity`: All four scripts must remain feature-parity across shells. Any future lifecycle changes (timeouts, env vars, telemetry hooks) land in both Bash and PowerShell variants simultaneously.

@@ -2,13 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Engine.Core.Accounts;
 
 namespace Engine.Client.Services;
 
-public sealed class AccountClient
+internal sealed class AccountClient
 {
     private readonly HttpClient _httpClient;
 
@@ -20,7 +21,7 @@ public sealed class AccountClient
     public async Task<UserRecord> CreateUserAsync(string displayName, CancellationToken cancellationToken = default)
     {
         var payload = new { displayName };
-        var response = await _httpClient.PostAsJsonAsync("accounts/users", payload, cancellationToken)
+        var response = await _httpClient.PostAsJsonAsync(BuildUri("accounts/users"), payload, cancellationToken)
             .ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         return (await response.Content.ReadFromJsonAsync<UserRecord>(cancellationToken: cancellationToken)
@@ -29,7 +30,8 @@ public sealed class AccountClient
 
     public async Task<UserRecord?> GetUserAsync(string userId, CancellationToken cancellationToken = default)
     {
-        var response = await _httpClient.GetAsync($"accounts/users/{userId}", cancellationToken).ConfigureAwait(false);
+        var response = await _httpClient.GetAsync(BuildUri($"accounts/users/{userId}"), cancellationToken)
+            .ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
             return null;
@@ -43,7 +45,7 @@ public sealed class AccountClient
     public async Task<IReadOnlyList<AccountRecord>> GetAccountsAsync(string userId,
         CancellationToken cancellationToken = default)
     {
-        var response = await _httpClient.GetAsync($"accounts/users/{userId}/accounts", cancellationToken)
+        var response = await _httpClient.GetAsync(BuildUri($"accounts/users/{userId}/accounts"), cancellationToken)
             .ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
@@ -62,7 +64,7 @@ public sealed class AccountClient
     {
         var payload = new { label };
         var response = await _httpClient
-            .PostAsJsonAsync($"accounts/users/{userId}/accounts", payload, cancellationToken)
+            .PostAsJsonAsync(BuildUri($"accounts/users/{userId}/accounts"), payload, cancellationToken)
             .ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
@@ -77,7 +79,7 @@ public sealed class AccountClient
     public async Task<IReadOnlyList<CharacterProfileRecord>> GetProfilesAsync(string accountId,
         CancellationToken cancellationToken = default)
     {
-        var response = await _httpClient.GetAsync($"accounts/accounts/{accountId}/profiles", cancellationToken)
+        var response = await _httpClient.GetAsync(BuildUri($"accounts/accounts/{accountId}/profiles"), cancellationToken)
             .ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
@@ -96,7 +98,7 @@ public sealed class AccountClient
     {
         var payload = new { name };
         var response = await _httpClient
-            .PostAsJsonAsync($"accounts/accounts/{accountId}/profiles", payload, cancellationToken)
+            .PostAsJsonAsync(BuildUri($"accounts/accounts/{accountId}/profiles"), payload, cancellationToken)
             .ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
@@ -106,6 +108,19 @@ public sealed class AccountClient
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         return (await response.Content.ReadFromJsonAsync<CharacterProfileRecord>(cancellationToken: cancellationToken)
             .ConfigureAwait(false))!;
+    }
+
+    private Uri BuildUri(string relativePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+        if (Uri.TryCreate(relativePath, UriKind.Absolute, out var absolute))
+        {
+            return absolute;
+        }
+
+        var baseAddress = _httpClient.BaseAddress
+                         ?? throw new InvalidOperationException("HttpClient.BaseAddress must be configured for AccountClient.");
+        return new Uri(baseAddress, relativePath);
     }
 
     private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
@@ -121,7 +136,11 @@ public sealed class AccountClient
             error = await response.Content.ReadFromJsonAsync<AccountError>(cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch
+        catch (JsonException)
+        {
+            // ignored - fall back to raw body.
+        }
+        catch (NotSupportedException)
         {
             // ignored - fall back to raw body.
         }
@@ -131,16 +150,30 @@ public sealed class AccountClient
             throw new AccountClientException(error.Code, error.Message);
         }
 
-        var fallback = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        var fallback = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         throw new AccountClientException("unknown",
             string.IsNullOrWhiteSpace(fallback) ? "Account API error" : fallback);
     }
 }
 
-public sealed class AccountClientException : Exception
+internal sealed class AccountClientException : Exception
 {
-    public AccountClientException(string code, string message)
-        : base(message)
+    public AccountClientException()
+    {
+        Code = "unknown";
+    }
+
+    public AccountClientException(string message) : base(message)
+    {
+        Code = "unknown";
+    }
+
+    public AccountClientException(string message, Exception? innerException) : base(message, innerException)
+    {
+        Code = "unknown";
+    }
+
+    public AccountClientException(string code, string message) : base(message)
     {
         Code = code;
     }

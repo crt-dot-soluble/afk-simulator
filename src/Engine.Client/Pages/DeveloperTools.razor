@@ -151,7 +151,7 @@
                         <option value="">Load profile</option>
                         @foreach (var profile in _profiles)
                         {
-                            <option value="@profile.Id">@profile.Id (@profile.LastUpdated.ToLocalTime().ToShortTimeString())</option>
+                            <option value="@profile.Id">@profile.Id (@profile.LastUpdated.ToLocalTime().ToString("t", CultureInfo.CurrentCulture))</option>
                         }
                     </select>
                 </div>
