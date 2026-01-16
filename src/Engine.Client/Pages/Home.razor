@@ -5,12 +5,39 @@
 @inject RenderLoopService RenderLoop
 @inject AccountClient AccountClient
 @inject IJSRuntime JsRuntime
+@inject ClientErrorReporter ErrorReporter
 
 @implements IAsyncDisposable
 
 <PageTitle>Mission Control</PageTitle>
 
 <main class="dashboard-grid">
+	@if (!string.IsNullOrWhiteSpace(_fatalError))
+	{
+		<section class="panel span-2 error-state">
+			<header>
+				<div>
+					<p>Telemetry Offline</p>
+					<small>Resolve the issue, then retry syncing.</small>
+				</div>
+				<button class="ghost" @onclick="RefreshAllAsync">Retry sync</button>
+			</header>
+			<p>@_fatalError</p>
+		</section>
+	}
+	else if (!string.IsNullOrWhiteSpace(_statusError))
+	{
+		<section class="panel span-2 warning-state">
+			<header>
+				<div>
+					<p>Partial Degradation</p>
+					<small>Some panels are stale; retry once stable.</small>
+				</div>
+				<button class="ghost" @onclick="RefreshAllAsync">Retry sync</button>
+			</header>
+			<p>@_statusError</p>
+		</section>
+	}
 	<section class="panel span-2">
 		<header>
 			<div>
@@ -223,6 +250,8 @@
 	private string? _accountError;
 	private ElementReference _canvasRef;
 	private bool _renderReady;
+	private string? _fatalError;
+	private string? _statusError;
 
 	private static readonly IReadOnlyDictionary<string, string> SpriteLibrary =
 		new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -233,7 +262,6 @@
 	protected override async Task OnInitializedAsync()
 	{
 		_playerId = GeneratePilotId();
-		await EnsureUserAsync();
 		await RefreshAllAsync();
 	}
 
@@ -247,28 +275,52 @@
 	{
 		if (firstRender && _renderReady)
 		{
-			await RenderLoop.InitializeAsync(_canvasRef, _currentSettings);
+			try
+			{
+				await RenderLoop.InitializeAsync(_canvasRef, _currentSettings);
+			}
+			catch (Exception ex)
+			{
+				await HandleErrorAsync(nameof(RenderLoop.InitializeAsync), ex, fatal: false);
+			}
 		}
 	}
 
 	private async Task RefreshAllAsync()
 	{
-		await EnsureUserAsync();
+		if (_busy)
+		{
+			return;
+		}
+
 		_busy = true;
-		var graphicsTask = GraphicsClient.GetAsync();
-		var leaderboardTask = LeaderboardClient.GetAsync();
-		var sessionsTask = SessionClient.ListAsync();
-		var accountsTask = RefreshAccountDataAsync();
+		try
+		{
+			await EnsureUserAsync();
+			var graphicsTask = GraphicsClient.GetAsync();
+			var leaderboardTask = LeaderboardClient.GetAsync();
+			var sessionsTask = SessionClient.ListAsync();
+			var accountsTask = RefreshAccountDataAsync();
 
-		_currentSettings = await graphicsTask;
-		_graphicsDraft = RenderSettingsDraft.From(_currentSettings);
-		_leaderboard = await leaderboardTask;
-		_sessions = await sessionsTask;
-		await accountsTask;
+			_currentSettings = await graphicsTask;
+			_graphicsDraft = RenderSettingsDraft.From(_currentSettings);
+			_leaderboard = await leaderboardTask;
+			_sessions = await sessionsTask;
+			await accountsTask;
 
-		_busy = false;
-		_renderReady = true;
-		StateHasChanged();
+			_fatalError = null;
+			_statusError = null;
+			_renderReady = true;
+		}
+		catch (Exception ex)
+		{
+			await HandleErrorAsync(nameof(RefreshAllAsync), ex, fatal: true);
+		}
+		finally
+		{
+			_busy = false;
+			StateHasChanged();
+		}
 	}
 
 	private async Task ApplyGraphicsAsync()
@@ -279,10 +331,21 @@
 		}
 
 		_busy = true;
-		var updated = _graphicsDraft.ToRenderSettings();
-		_currentSettings = await GraphicsClient.UpdateAsync(updated);
-		await RenderLoop.UpdateSettingsAsync(_currentSettings);
-		_busy = false;
+		try
+		{
+			var updated = _graphicsDraft.ToRenderSettings();
+			_currentSettings = await GraphicsClient.UpdateAsync(updated);
+			await RenderLoop.UpdateSettingsAsync(_currentSettings);
+			_statusError = null;
+		}
+		catch (Exception ex)
+		{
+			await HandleErrorAsync(nameof(ApplyGraphicsAsync), ex);
+		}
+		finally
+		{
+			_busy = false;
+		}
 	}
 
 	private void ResetGraphics()
@@ -321,6 +384,7 @@
 			catch (AccountClientException ex)
 			{
 				_accountError ??= ex.Message;
+				await HandleErrorAsync(nameof(EnsureUserAsync), ex, updateStatus: false);
 			}
 		}
 
@@ -336,6 +400,7 @@
 		catch (AccountClientException ex)
 		{
 			_accountError = ex.Message;
+			await HandleErrorAsync(nameof(EnsureUserAsync), ex, updateStatus: false);
 		}
 	}
 
@@ -384,6 +449,7 @@
 		{
 			_accountError = ex.Message;
 			_profiles = Array.Empty<CharacterProfileRecord>();
+			await HandleErrorAsync(nameof(RefreshAccountDataAsync), ex, updateStatus: false);
 		}
 	}
 
@@ -414,6 +480,7 @@
 		catch (AccountClientException ex)
 		{
 			_accountError = ex.Message;
+			await HandleErrorAsync(nameof(LoadProfilesForSelectionAsync), ex, updateStatus: false);
 		}
 	}
 
@@ -438,6 +505,12 @@
 		catch (AccountClientException ex)
 		{
 			_accountError = ex.Message;
+			await HandleErrorAsync(nameof(CreateUserAccountAsync), ex, updateStatus: false);
+		}
+		catch (Exception ex)
+		{
+			_accountError ??= "Unexpected error while creating a hangar.";
+			await HandleErrorAsync(nameof(CreateUserAccountAsync), ex);
 		}
 		finally
 		{
@@ -463,6 +536,12 @@
 		catch (AccountClientException ex)
 		{
 			_accountError = ex.Message;
+			await HandleErrorAsync(nameof(CreateProfileAsync), ex, updateStatus: false);
+		}
+		catch (Exception ex)
+		{
+			_accountError ??= "Unexpected error while creating a profile.";
+			await HandleErrorAsync(nameof(CreateProfileAsync), ex);
 		}
 		finally
 		{
@@ -472,19 +551,42 @@
 
 	private async Task RefreshLeaderboardAsync()
 	{
-		_leaderboard = await LeaderboardClient.GetAsync();
+		try
+		{
+			_leaderboard = await LeaderboardClient.GetAsync();
+			_statusError = null;
+		}
+		catch (Exception ex)
+		{
+			await HandleErrorAsync(nameof(RefreshLeaderboardAsync), ex);
+		}
 	}
 
 	private async Task SubmitScoreAsync()
 	{
-		var score = Math.Max(0, _pendingScore);
-		await LeaderboardClient.SubmitAsync(_playerId, _playerId, score);
-		await RefreshLeaderboardAsync();
+		try
+		{
+			var score = Math.Max(0, _pendingScore);
+			await LeaderboardClient.SubmitAsync(_playerId, _playerId, score);
+			await RefreshLeaderboardAsync();
+		}
+		catch (Exception ex)
+		{
+			await HandleErrorAsync(nameof(SubmitScoreAsync), ex);
+		}
 	}
 
 	private async Task RefreshSessionsAsync()
 	{
-		_sessions = await SessionClient.ListAsync();
+		try
+		{
+			_sessions = await SessionClient.ListAsync();
+			_statusError = null;
+		}
+		catch (Exception ex)
+		{
+			await HandleErrorAsync(nameof(RefreshSessionsAsync), ex);
+		}
 	}
 
 	private async Task CreateSessionAsync()
@@ -494,19 +596,56 @@
 			_newSessionName = "Untitled Node";
 		}
 
-		await SessionClient.CreateAsync(_newSessionName);
-		await RefreshSessionsAsync();
+		try
+		{
+			await SessionClient.CreateAsync(_newSessionName);
+			await RefreshSessionsAsync();
+		}
+		catch (Exception ex)
+		{
+			await HandleErrorAsync(nameof(CreateSessionAsync), ex);
+		}
 	}
 
 	private async Task JoinSessionAsync(string sessionId)
 	{
-		await SessionClient.JoinAsync(sessionId, _playerId);
-		await RefreshSessionsAsync();
+		try
+		{
+			await SessionClient.JoinAsync(sessionId, _playerId);
+			await RefreshSessionsAsync();
+		}
+		catch (Exception ex)
+		{
+			await HandleErrorAsync(nameof(JoinSessionAsync), ex);
+		}
 	}
 
 	public async ValueTask DisposeAsync()
 	{
-		await RenderLoop.DisposeAsync();
+		try
+		{
+			await RenderLoop.DisposeAsync();
+		}
+		catch (Exception ex)
+		{
+			await HandleErrorAsync(nameof(RenderLoop.DisposeAsync), ex, updateStatus: false);
+		}
+	}
+
+	private async Task HandleErrorAsync(string operation, Exception exception, bool fatal = false, bool updateStatus = true)
+	{
+		await ErrorReporter.ReportAsync(operation, exception);
+		await Console.Error.WriteLineAsync($"[{operation}] {exception}");
+		var message = $"{operation} failed: {exception.Message}";
+		if (fatal)
+		{
+			_fatalError = message;
+			_renderReady = false;
+		}
+		else if (updateStatus)
+		{
+			_statusError = message;
+		}
 	}
 
 	private static IEnumerable<(string Label, string Value)> EnumerateEquipment(EquipmentSlots equipment)

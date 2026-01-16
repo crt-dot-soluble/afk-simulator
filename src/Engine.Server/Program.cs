@@ -6,6 +6,7 @@ using Engine.Core.DeveloperTools;
 using Engine.Core.Multiplayer;
 using Engine.Core.Rendering;
 using Engine.Server.Hubs;
+using Engine.Server.Logging;
 using Engine.Server.Models;
 using Engine.Server.Security;
 using Microsoft.AspNetCore.SignalR;
@@ -177,6 +178,17 @@ accountsApi.MapPost("/accounts/{accountId}/profiles",
             return Results.Conflict(new AccountError(ex.Code, ex.Message));
         }
     });
+
+app.MapPost("/telemetry/errors", (ClientErrorReport report, HttpContext context, ILoggerFactory loggerFactory) =>
+{
+    var logger = loggerFactory.CreateLogger("ClientError");
+    var agent = context.Request.Headers.UserAgent.ToString();
+    var source = string.IsNullOrWhiteSpace(report.Source) ? "unknown" : report.Source;
+    var message = string.IsNullOrWhiteSpace(report.Message) ? "Client error" : report.Message;
+    var stack = string.IsNullOrWhiteSpace(report.StackTrace) ? "n/a" : report.StackTrace;
+    logger.LogClientError(source, message, stack, agent);
+    return Results.Accepted();
+});
 
 app.MapGet("/graphics/settings", (RenderSettingsStore store) => Results.Ok(store.Current));
 

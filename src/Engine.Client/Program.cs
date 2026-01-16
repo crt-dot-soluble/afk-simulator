@@ -15,5 +15,6 @@ builder.Services.AddScoped<SessionClient>();
 builder.Services.AddScoped<RenderLoopService>();
 builder.Services.AddScoped<DeveloperToolsClient>();
 builder.Services.AddScoped<AccountClient>();
+builder.Services.AddScoped<ClientErrorReporter>();
 
 await builder.Build().RunAsync().ConfigureAwait(false);

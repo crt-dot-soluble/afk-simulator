@@ -103,6 +103,23 @@ body {
     box-shadow: 0 25px 45px rgba(5, 6, 12, 0.45);
 }
 
+.panel.error-state {
+    border: 1px solid #f06272;
+    background: #3c0c16;
+    color: #ffe1e6;
+}
+
+.panel.warning-state {
+    border: 1px solid #f5d17a;
+    background: #2f2305;
+    color: #fff7d6;
+}
+
+.panel.error-state button,
+.panel.warning-state button {
+    color: inherit;
+}
+
 .panel header,
 .panel footer {
     display: flex;

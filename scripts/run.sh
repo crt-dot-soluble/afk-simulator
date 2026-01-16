@@ -38,6 +38,32 @@ log() {
   printf '[run] %s\n' "$1"
 }
 
+ensure_port_free() {
+  local port="$1"
+  local label="$2"
+  local pid=""
+
+  if command -v lsof >/dev/null 2>&1; then
+    pid="$(lsof -ti tcp:"${port}" -sTCP:LISTEN 2>/dev/null | head -n1 || true)"
+  elif command -v ss >/dev/null 2>&1; then
+    pid="$(ss -ltnp 2>/dev/null | awk -v p=":${port}" '$4 ~ p {print $NF}' | sed -E 's/.*pid=([0-9]+).*/\1/' | head -n1)"
+  fi
+
+  if [[ -z "${pid}" ]]; then
+    return
+  fi
+
+  local cmdline="$(ps -p "${pid}" -o command= 2>/dev/null || true)"
+  if [[ -n "${cmdline}" ]] && [[ "${cmdline}" == *"${REPO_ROOT}"* ]]; then
+    log "Stopping leftover ${label} host on port ${port} (PID ${pid})"
+    kill "${pid}" 2>/dev/null || true
+    sleep 1
+  else
+    printf '[run] Port %s (%s) is in use by PID %s. Stop that process or update launch settings.\n' "${port}" "${label}" "${pid}" >&2
+    exit 1
+  fi
+}
+
 open_url() {
   local url="$1"
   if command -v xdg-open >/dev/null 2>&1; then
@@ -61,13 +87,17 @@ open_url() {
   fi
 }
 
+ensure_port_free 7206 "Engine.Server"
+ensure_port_free 5206 "Engine.Server"
 log "Launching Engine.Server for end-user session..."
-dotnet run --project "${REPO_ROOT}/src/Engine.Server" &
+dotnet run --project "${REPO_ROOT}/src/Engine.Server" --launch-profile https &
 SERVER_PID=$!
 sleep 3
 
+ensure_port_free 7061 "Engine.Client"
+ensure_port_free 5269 "Engine.Client"
 log "Launching Engine.Client (Mission Control UI)..."
-dotnet run --project "${REPO_ROOT}/src/Engine.Client" &
+dotnet run --project "${REPO_ROOT}/src/Engine.Client" --launch-profile https &
 CLIENT_PID=$!
 sleep 4
 
