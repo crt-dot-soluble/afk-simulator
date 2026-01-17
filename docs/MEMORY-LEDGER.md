@@ -13,6 +13,18 @@ Actions:
 - ACTION: Updated the wiki/database notes to call out the serialized ModuleStateStore writes and logged this entry for future agents.
 
 ---
+EntryId: MEM-20260118-01
+Timestamp: 2026-01-18T00:45:00Z
+Scope: Workflow;Version Control;Testing
+Summary: Strengthened SPECIFICATION.MD with machine-readable branching, commit, and testing directives so every agent follows the same branch lifecycle and CI parity checks.
+Decisions:
+- DECISION: Every feature branch must run Release tests, targeted suites, launchers, and CI parity tasks before staging/committing/pushing.
+- DECISION: Branch creation, refinement, testing, and pushing now follow a seven-step lifecycle baked into §10.9, with guardrails reiterated in §17.
+Actions:
+- ACTION: Updated SPECIFICATION.MD §§10 & 17 to codify the branch/test workflow and added CI/CD parity expectations.
+- ACTION: Logged the change in the TODO ledger under the operational tooling entry for traceability.
+
+---
 EntryId: MEM-20260117-05
 Timestamp: 2026-01-17T23:50:00Z
 Scope: Module Views;Mission Control;Leaderboard/Sessions

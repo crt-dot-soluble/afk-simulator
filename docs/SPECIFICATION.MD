@@ -89,7 +89,7 @@
 9.6 `Multiplayer KPIs`: Sub-150ms round-trip for multiplayer actions with jitter buffers; leaderboards replicate within 1s of authoritative update.
 
 ## 10. Workflow & TODO Ledger
-10.1 `Version Control`: GitHub feature branches (`feature/<id>-<slug>`). PR template requires checklist: tests, TODO updates, spec impact.
+10.1 `Version Control`: GitHub feature branches (`feature/<id>-<slug>`). PR template requires checklist: tests, TODO updates, spec impact. Branch names always start from the TODO entry ID so automation can trace lineage without heuristics.
 10.2 `TODO Ledger` (machine-first):
 ```
 ID:<uuid>
@@ -104,11 +104,22 @@ Notes:<short context>
 - Stored in `/docs/TODO-LEDGER.md`, parsed by AI agents.
 - Every commit must append to `ChangeLog` entries describing touched IDs for post-hoc reasoning.
 10.3 `AI Sync Hooks`: CI step publishes ledger + spec digest to artifacts enabling agents to bootstrap context.
-10.4 `Testing Mandate`: Every feature branch must include a dedicated automated test suite (unit + integration + GPU/render snapshots as applicable) before merge; PRs without tests are blocked by policy checks.
+10.4 `Testing Mandate`: Every feature branch must include a dedicated automated test suite (unit + integration + GPU/render snapshots as applicable) before merge; PRs without tests are blocked by policy checks. Contributors must rerun the full Release configuration (`dotnet test -c Release`) plus any `runTests`-based focus suites and ensure the CI/CD matrix (Windows/Linux) passes locally when touching build, persistence, or rendering logic.
 10.5 `Branch Health`: Feature branches may only merge when lint/analyzer, formatting, deterministic builds, and multiplayer soak tests pass; partial implementations stay isolated until all acceptance tests succeed.
 10.6 `Commit Format`: Conventional commits are mandatory. Short messages follow `type(scope): summary` (e.g., `feat(devtools): add diagnostics noise`). The commit body must inline the exact TODO Ledger block(s) associated with the change so automated agents can diff status, and the footer must reference those entries (example: `Refs: docs/TODO-LEDGER.md#ID:00000000-0000-0000-0000-000000000003`).
 10.7 `Branch Discipline`: Every effort begins on a fresh `feature/<todo-id>-<slug>` branch. Push after every logical commit to keep the remote mirror current; local-only work is prohibited because TODO ledger, CI, and reviewers depend on real-time branch availability.
 10.8 `Ledger Coupling`: When a commit touches multiple ledger IDs, include the full block for each ID in the body and annotate the footer with multiple `Refs:` lines to maintain bidirectional traceability.
+10.9 `Feature Branch Lifecycle`:
+```
+1. Create branch `feature/<todo-id>-<slug>` immediately after pulling `main`.
+2. Implement the change while continuously reviewing/refining code; keep work in small, reviewable slices.
+3. Run analyzers/formatters followed by `dotnet test -c Release`, targeted `runTests` suites, and any CI/CD smoke tasks (e.g., `scripts/run.ps1 -NoBrowser`, `scripts/run_developer.ps1 -NoBrowser`) to mirror the pipeline locally.
+4. If the stack launches, exercise the feature manually (Mission Control + /devtools) to confirm runtime behavior before staging.
+5. Stage only the files tied to the current logical slice, craft a conventional commit message, and embed the authoritative TODO block + `Refs:` footer.
+6. Push the branch immediately after each commit (`git push -u origin feature/<todo-id>-<slug>`) so CI/CD runs and stakeholders can monitor progress in real time.
+7. Create/update the PR once the branch contains at least one passing, pushed commit; continue iterating with the same loop until reviewers approve.
+```
+10.10 `CI/CD Parity`: Treat the GitHub Actions matrix as part of the developer workflow. Any feature touching infrastructure, persistence, rendering, networking, or tooling must execute the equivalent local tasks (Release tests + launcher verification) before committing to reduce CI churn.
 
 ## 11. AI-Augmented Development
 11.1 `Metadata`: Each module includes `MODULE.yaml` with exports, dependencies, telemetry keys for AI ingestion.
@@ -168,4 +179,11 @@ Notes:<short context>
 2. Append a new entry to docs/MEMORY-LEDGER.md (newest-first) summarizing the conversation or change set.
 3. If the work alters core principles, direction, design, or workflow expectations, amend docs/SPECIFICATION.MD accordingly.
 4. Ensure the TODO Ledger entry cited in the commit reflects the new state before considering the task complete.
+```
+17.3 `In-Session Guardrails`:
+```
+1. Re-read docs/SPECIFICATION.MD whenever relaunching scripts/run*.ps1 or returning from a break to keep directives fresh.
+2. For every coding slice: read/plan → implement → review/refine → run tests (`dotnet test -c Release` + targeted suites) → run the app (`scripts/run.ps1` or `scripts/run_developer.ps1`) → only then stage/commit/push.
+3. Before handing off work (PR updates, pauses longer than an hour), rerun Release tests and capture launcher status so the next agent inherits a deterministic state.
+4. Treat CI parity tasks (matrix builds/tests) as mandatory rehearsal; if a local capacity limit prevents running them, halt and document the blocker in the ledger before proceeding.
 ```
