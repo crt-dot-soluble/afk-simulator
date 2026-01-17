@@ -142,6 +142,23 @@ Checklist:
 - [ ] Reviewers pinged
 ```
 10.12 `PR Entry Point`: Include the GitHub compare link in every handoff (e.g., `https://github.com/crt-dot-soluble/afk-simulator/compare/main...feature/<todo-id>-<slug>`) so reviewers can open the PR in one click; mention it explicitly whenever a PR is requested.
+10.13 `Commit Template` (always use this structure for every commit; copy/paste and fill in the fields):
+````
+type(scope): summary
+
+```
+ID:<todo-id>
+Title:<todo title>
+Status:<status>
+Owner:<owner>
+Links:<spec refs>
+ChangeLog:
+  - <ISO timestamp>: <short summary>
+Notes:<context>
+```
+
+Refs: docs/TODO-LEDGER.md#ID:<todo-id>
+````
 
 ## 11. AI-Augmented Development
 11.1 `Metadata`: Each module includes `MODULE.yaml` with exports, dependencies, telemetry keys for AI ingestion.

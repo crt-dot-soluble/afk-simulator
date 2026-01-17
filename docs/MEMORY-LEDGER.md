@@ -46,6 +46,16 @@ Actions:
 - ACTION: Updated SPECIFICATION.MD, TODO ledger, and this memory log to capture the compare-link directive for future agents.
 
 ---
+EntryId: MEM-20260118-04
+Timestamp: 2026-01-18T01:40:00Z
+Scope: Workflow;Commits
+Summary: Introduced a standardized commit message template (subject + TODO block + refs) in SPEC §10.13 so every change carries machine-readable context.
+Decisions:
+- DECISION: All commits must copy/paste the template to guarantee TODO linkage and consistent metadata.
+Actions:
+- ACTION: Updated SPEC/TODO ledger to capture the template requirement for future agents.
+
+---
 EntryId: MEM-20260117-05
 Timestamp: 2026-01-17T23:50:00Z
 Scope: Module Views;Mission Control;Leaderboard/Sessions
