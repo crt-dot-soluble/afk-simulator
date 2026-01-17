@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -57,6 +59,21 @@ public sealed class MultiplayerSessionService : IMultiplayerSessionService
             yield return state.Describe(id);
             await Task.Yield();
         }
+    }
+
+    public IReadOnlyCollection<SessionDescriptor> Snapshot(int take = 100)
+    {
+        if (take <= 0)
+        {
+            return Array.Empty<SessionDescriptor>();
+        }
+
+        return _sessions
+            .Select(pair => pair.Value.Describe(pair.Key))
+            .OrderByDescending(descriptor => descriptor.PlayerCount)
+            .ThenByDescending(descriptor => descriptor.CreatedAt)
+            .Take(take)
+            .ToArray();
     }
 
     private static string GenerateSessionId(string seed)

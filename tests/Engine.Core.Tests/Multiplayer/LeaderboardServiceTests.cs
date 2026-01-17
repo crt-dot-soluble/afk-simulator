@@ -3,7 +3,7 @@ using Engine.Core.Multiplayer;
 
 namespace Engine.Core.Tests.Multiplayer;
 
-public sealed class LeaderboardServiceTests
+internal sealed class LeaderboardServiceTests
 {
     [Fact]
     public async Task ReportAsyncOrdersDescending()

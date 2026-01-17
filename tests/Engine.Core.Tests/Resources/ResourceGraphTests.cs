@@ -2,7 +2,7 @@ using Engine.Core.Resources;
 
 namespace Engine.Core.Tests.Resources;
 
-public sealed class ResourceGraphTests
+internal sealed class ResourceGraphTests
 {
     [Fact]
     public void AdvanceTransfersResourcesAlongEdges()
@@ -12,9 +12,9 @@ public sealed class ResourceGraphTests
         graph.UpsertNode(new ResourceNodeDefinition("ingot", 1000));
         graph.UpsertEdge(new ResourceEdgeDefinition("smelt", "ore", "ingot", 5, 0.5));
 
-            var snapshot = graph.Advance(TimeSpan.FromSeconds(10));
+        var snapshot = graph.Advance(TimeSpan.FromSeconds(10));
 
-            Assert.Equal(50, snapshot["ore"].Value, 3);
-            Assert.Equal(25, snapshot["ingot"].Value, 3);
+        Assert.Equal(50, snapshot["ore"].Value, 3);
+        Assert.Equal(25, snapshot["ingot"].Value, 3);
     }
 }

@@ -1,5 +1,7 @@
+using System;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading;
 using Engine.Core.Contracts;
 
 namespace Engine.Core.Scheduling;
@@ -9,32 +11,40 @@ namespace Engine.Core.Scheduling;
 /// </summary>
 public sealed class TickScheduler
 {
-    private readonly SortedDictionary<int, List<ITickConsumer>> _pipelines = new();
-    private readonly TimeSpan _tickDuration;
+    private readonly SortedDictionary<int, List<TickConsumerRegistration>> _pipelines = new();
     private readonly ISystemClock _clock;
+    private long _tickDurationTicks;
     private long _tickIndex;
     private readonly object _gate = new();
 
     public TickScheduler(TimeSpan tickDuration, ISystemClock clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        UpdateTickDuration(tickDuration);
+        _clock = clock;
+    }
+
+    public event EventHandler<TickTelemetryEventArgs>? TickExecuted;
+
+    public TimeSpan TickDuration => TimeSpan.FromTicks(Interlocked.Read(ref _tickDurationTicks));
+
+    public void UpdateTickDuration(TimeSpan tickDuration)
     {
         if (tickDuration <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(tickDuration), "Tick duration must be positive.");
         }
 
-        _tickDuration = tickDuration;
-        _clock = clock;
+        Interlocked.Exchange(ref _tickDurationTicks, tickDuration.Ticks);
     }
 
-    public event EventHandler<TickTelemetryEventArgs>? TickExecuted;
-
-    public void RegisterConsumer(ITickConsumer consumer, int priority = 0)
+    public void RegisterConsumer(ITickConsumer consumer, int priority = 0, TickRateProfile? rate = null)
     {
         ArgumentNullException.ThrowIfNull(consumer);
 
         lock (_gate)
         {
-            if (_pipelines.Values.SelectMany(static c => c).Any(c => c.Id == consumer.Id))
+            if (_pipelines.Values.SelectMany(static c => c).Any(c => c.Consumer.Id == consumer.Id))
             {
                 throw new InvalidOperationException($"A consumer with id '{consumer.Id}' is already registered.");
             }
@@ -45,7 +55,7 @@ public sealed class TickScheduler
                 _pipelines[priority] = consumers;
             }
 
-            consumers.Add(consumer);
+            consumers.Add(new TickConsumerRegistration(consumer, rate ?? TickRateProfile.Normal));
         }
     }
 
@@ -57,7 +67,7 @@ public sealed class TickScheduler
         {
             foreach (var (priority, consumers) in _pipelines)
             {
-                var removed = consumers.RemoveAll(c => c.Id == consumerId);
+                var removed = consumers.RemoveAll(c => c.Consumer.Id == consumerId);
                 if (removed > 0)
                 {
                     if (consumers.Count == 0)
@@ -67,6 +77,29 @@ public sealed class TickScheduler
 
                     return true;
                 }
+            }
+        }
+
+        return false;
+    }
+
+    public bool UpdateConsumerRate(string consumerId, TickRateProfile rate)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(consumerId);
+        ArgumentNullException.ThrowIfNull(rate);
+
+        lock (_gate)
+        {
+            foreach (var consumers in _pipelines.Values)
+            {
+                var registration = consumers.FirstOrDefault(c => string.Equals(c.Consumer.Id, consumerId, StringComparison.OrdinalIgnoreCase));
+                if (registration is null)
+                {
+                    continue;
+                }
+
+                registration.Update(rate);
+                return true;
             }
         }
 
@@ -91,7 +124,7 @@ public sealed class TickScheduler
             var tickStart = _clock.UtcNow;
             await RunSingleTickAsync(cancellationToken).ConfigureAwait(false);
             var elapsed = _clock.UtcNow - tickStart;
-            var remaining = _tickDuration - elapsed;
+            var remaining = TickDuration - elapsed;
             if (remaining > TimeSpan.Zero)
             {
                 await Task.Delay(remaining, cancellationToken).ConfigureAwait(false);
@@ -101,42 +134,93 @@ public sealed class TickScheduler
 
     private async Task RunSingleTickAsync(CancellationToken cancellationToken)
     {
-        List<ITickConsumer>[] snapshot;
+        List<TickConsumerRegistration>[] snapshot;
         lock (_gate)
         {
             snapshot = _pipelines.Values.Select(list => list.ToList()).ToArray();
         }
 
-        var context = new TickContext(_tickIndex, _tickDuration, _clock.UtcNow);
+        var tickDuration = TickDuration;
+        var tickTime = _clock.UtcNow;
         var sw = Stopwatch.StartNew();
+        var invocationCount = 0;
         foreach (var consumers in snapshot)
         {
             foreach (var consumer in consumers)
             {
-                await consumer.OnTickAsync(context, cancellationToken).ConfigureAwait(false);
+                var relativeSpeed = consumer.Profile.RelativeSpeed;
+                if (relativeSpeed <= 0d)
+                {
+                    continue;
+                }
+
+                consumer.Accumulator += relativeSpeed;
+                var invocations = (int)Math.Floor(consumer.Accumulator);
+                if (invocations == 0)
+                {
+                    continue;
+                }
+
+                consumer.Accumulator -= invocations;
+                var effectiveDuration = CalculateEffectiveDuration(tickDuration, relativeSpeed);
+                for (var i = 0; i < invocations; i++)
+                {
+                    var context = new TickContext(_tickIndex, tickDuration, tickTime, effectiveDuration, relativeSpeed);
+                    await consumer.Consumer.OnTickAsync(context, cancellationToken).ConfigureAwait(false);
+                    invocationCount++;
+                }
             }
         }
 
         sw.Stop();
         var consumerCount = snapshot.Sum(list => list.Count);
-        TickExecuted?.Invoke(this, new TickTelemetryEventArgs(context.TickIndex, sw.Elapsed, consumerCount));
+        TickExecuted?.Invoke(this,
+            new TickTelemetryEventArgs(_tickIndex, sw.Elapsed, consumerCount, invocationCount));
         _tickIndex++;
+    }
+
+    private static TimeSpan CalculateEffectiveDuration(TimeSpan tickDuration, double relativeSpeed)
+    {
+        var ticks = tickDuration.Ticks / relativeSpeed;
+        var rounded = (long)Math.Max(1d, Math.Round(ticks, MidpointRounding.AwayFromZero));
+        return TimeSpan.FromTicks(rounded);
+    }
+
+    private sealed class TickConsumerRegistration
+    {
+        public TickConsumerRegistration(ITickConsumer consumer, TickRateProfile profile)
+        {
+            Consumer = consumer;
+            Profile = profile;
+        }
+
+        public ITickConsumer Consumer { get; }
+        public TickRateProfile Profile { get; private set; }
+        public double Accumulator { get; set; }
+
+        public void Update(TickRateProfile profile)
+        {
+            Profile = profile;
+            Accumulator = 0d;
+        }
     }
 }
 
-    /// <summary>
-    /// Event payload representing a completed tick.
-    /// </summary>
-    public sealed class TickTelemetryEventArgs : EventArgs
+/// <summary>
+/// Event payload representing a completed tick.
+/// </summary>
+public sealed class TickTelemetryEventArgs : EventArgs
+{
+    public TickTelemetryEventArgs(long tickIndex, TimeSpan elapsed, int consumerCount, int invocationCount)
     {
-        public TickTelemetryEventArgs(long tickIndex, TimeSpan elapsed, int consumerCount)
-        {
-            TickIndex = tickIndex;
-            Elapsed = elapsed;
-            ConsumerCount = consumerCount;
-        }
-
-        public long TickIndex { get; }
-        public TimeSpan Elapsed { get; }
-        public int ConsumerCount { get; }
+        TickIndex = tickIndex;
+        Elapsed = elapsed;
+        ConsumerCount = consumerCount;
+        InvocationCount = invocationCount;
     }
+
+    public long TickIndex { get; }
+    public TimeSpan Elapsed { get; }
+    public int ConsumerCount { get; }
+    public int InvocationCount { get; }
+}

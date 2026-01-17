@@ -3,7 +3,7 @@ using Engine.Core.Time;
 
 namespace Engine.Core.Tests.Time;
 
-public sealed class DeterministicSystemClockTests
+internal sealed class DeterministicSystemClockTests
 {
     [Fact]
     public void UtcNowAdvancesFromOrigin()

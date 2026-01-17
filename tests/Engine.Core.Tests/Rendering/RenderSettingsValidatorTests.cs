@@ -2,7 +2,7 @@ using Engine.Core.Rendering;
 
 namespace Engine.Core.Tests.Rendering;
 
-public sealed class RenderSettingsValidatorTests
+internal sealed class RenderSettingsValidatorTests
 {
     [Fact]
     public void ValidateAllowsBalancedPreset()

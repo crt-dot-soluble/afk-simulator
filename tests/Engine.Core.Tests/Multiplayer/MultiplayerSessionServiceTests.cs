@@ -3,7 +3,7 @@ using Engine.Core.Multiplayer;
 
 namespace Engine.Core.Tests.Multiplayer;
 
-public sealed class MultiplayerSessionServiceTests
+internal sealed class MultiplayerSessionServiceTests
 {
     [Fact]
     public async Task CreateJoinLeaveLifecycleRemovesEmptySessions()
@@ -33,7 +33,7 @@ public sealed class MultiplayerSessionServiceTests
     private static async Task<List<SessionDescriptor>> CollectSessionsAsync(MultiplayerSessionService service)
     {
         var list = new List<SessionDescriptor>();
-        await foreach (var session in service.ListSessionsAsync().ConfigureAwait(false))
+        await foreach (var session in service.ListSessionsAsync())
         {
             list.Add(session);
         }

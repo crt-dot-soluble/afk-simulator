@@ -2,7 +2,7 @@ using Engine.Core.Assets;
 
 namespace Engine.Core.Tests.Assets;
 
-public sealed class AssetManifestTests
+internal sealed class AssetManifestTests
 {
     [Fact]
     public void RegisterComputesHashAndRetrievable()

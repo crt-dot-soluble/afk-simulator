@@ -3,7 +3,7 @@ using Engine.Core.Rendering;
 
 namespace Engine.Core.Tests.Rendering;
 
-public sealed class RenderSettingsStoreTests
+internal sealed class RenderSettingsStoreTests
 {
     [Fact]
     public void UpdatePersistsLatestSettings()
