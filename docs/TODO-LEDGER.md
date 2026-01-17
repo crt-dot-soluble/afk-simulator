@@ -69,6 +69,7 @@ ChangeLog:
   - 2026-01-17T21:00:00Z: Added form-capable module view blocks, migrated the Universe Foundry panel to AccountModule-owned documents, and taught the Blazor shell to route action payloads/context back to modules.
   - 2026-01-17T23:00:00Z: Taught the client renderer to handle grid/action blocks, restyled module-view components, and moved the statistics overview onto the new grid document.
   - 2026-01-17T23:50:00Z: Removed legacy leaderboard/session forms, routed pilot aliases through module-view context, and wired Mission Control actions to module-owned score + session commands only.
+  - 2026-01-18T00:30:00Z: Serialized DatabaseModuleStateStore writes so Mission Control can run end-to-end without SQLite "database is locked" crashes during tick persistence.
 Notes:Tracks the fully declarative dashboard effort so every module provides its own telemetry + input surfaces without bespoke Razor.
 ```
 

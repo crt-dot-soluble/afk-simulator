@@ -1,6 +1,18 @@
 # Memory Ledger
 
 ---
+EntryId: MEM-20260117-06
+Timestamp: 2026-01-18T00:30:00Z
+Scope: Persistence;Mission Control;Launcher
+Summary: Serialized the module-state persistence pipeline with a write gate so the Mission Control launcher no longer crashes with SQLite "database is locked" errors during the tick loop.
+Decisions:
+- DECISION: DatabaseModuleStateStore must serialize writes/deletes through a shared semaphore to keep SQLite happy until we swap to Supabase/Postgres.
+- DECISION: Launcher verification remains part of the workflow whenever persistence changes touch Mission Control.
+Actions:
+- ACTION: Wrapped DatabaseModuleStateStore.SaveAsync/DeleteAsync in a semaphore, implemented IAsyncDisposable, reran tests, and confirmed `scripts/run.ps1 -NoBrowser` stays alive without lock faults.
+- ACTION: Updated the wiki/database notes to call out the serialized ModuleStateStore writes and logged this entry for future agents.
+
+---
 EntryId: MEM-20260117-05
 Timestamp: 2026-01-17T23:50:00Z
 Scope: Module Views;Mission Control;Leaderboard/Sessions

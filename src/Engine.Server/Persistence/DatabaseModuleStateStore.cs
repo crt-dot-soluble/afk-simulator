@@ -9,10 +9,11 @@ using Microsoft.EntityFrameworkCore;
 namespace Engine.Server.Persistence;
 
 [SuppressMessage("Performance", "CA1812", Justification = "Registered via dependency injection.")]
-internal sealed class DatabaseModuleStateStore : IModuleStateStore
+internal sealed class DatabaseModuleStateStore : IModuleStateStore, IAsyncDisposable
 {
     private readonly IDbContextFactory<IncrementalEngineDbContext> _factory;
     private readonly Task _initializationTask;
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
 
     public DatabaseModuleStateStore(IDbContextFactory<IncrementalEngineDbContext> factory)
     {
@@ -44,45 +45,67 @@ internal sealed class DatabaseModuleStateStore : IModuleStateStore
         CancellationToken cancellationToken = default)
     {
         await _initializationTask.ConfigureAwait(false);
-        using var db = await _factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var entity = await db.ModuleStates
-            .FirstOrDefaultAsync(state => state.ModuleId == moduleId && state.StateKey == stateKey,
-                cancellationToken)
-            .ConfigureAwait(false);
-        var buffer = payload.ToArray();
-        if (entity is null)
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            db.ModuleStates.Add(new ModuleStateEntity
+            using var db = await _factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+            var entity = await db.ModuleStates
+                .FirstOrDefaultAsync(state => state.ModuleId == moduleId && state.StateKey == stateKey,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            var buffer = payload.ToArray();
+            if (entity is null)
             {
-                ModuleId = moduleId,
-                StateKey = stateKey,
-                Payload = buffer,
-                UpdatedAt = DateTimeOffset.UtcNow
-            });
-        }
-        else
-        {
-            entity.Payload = buffer;
-            entity.UpdatedAt = DateTimeOffset.UtcNow;
-        }
+                db.ModuleStates.Add(new ModuleStateEntity
+                {
+                    ModuleId = moduleId,
+                    StateKey = stateKey,
+                    Payload = buffer,
+                    UpdatedAt = DateTimeOffset.UtcNow
+                });
+            }
+            else
+            {
+                entity.Payload = buffer;
+                entity.UpdatedAt = DateTimeOffset.UtcNow;
+            }
 
-        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     public async ValueTask DeleteAsync(string moduleId, string stateKey, CancellationToken cancellationToken = default)
     {
         await _initializationTask.ConfigureAwait(false);
-        using var db = await _factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var entity = await db.ModuleStates
-            .FirstOrDefaultAsync(state => state.ModuleId == moduleId && state.StateKey == stateKey,
-                cancellationToken)
-            .ConfigureAwait(false);
-        if (entity is null)
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            return;
-        }
+            using var db = await _factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+            var entity = await db.ModuleStates
+                .FirstOrDefaultAsync(state => state.ModuleId == moduleId && state.StateKey == stateKey,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (entity is null)
+            {
+                return;
+            }
 
-        db.ModuleStates.Remove(entity);
-        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            db.ModuleStates.Remove(entity);
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _writeLock.Dispose();
+        return ValueTask.CompletedTask;
     }
 }
