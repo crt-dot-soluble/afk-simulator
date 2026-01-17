@@ -141,6 +141,7 @@ Checklist:
 - [ ] Branch pushed + CI green
 - [ ] Reviewers pinged
 ```
+10.12 `PR Entry Point`: Include the GitHub compare link in every handoff (e.g., `https://github.com/crt-dot-soluble/afk-simulator/compare/main...feature/<todo-id>-<slug>`) so reviewers can open the PR in one click; mention it explicitly whenever a PR is requested.
 
 ## 11. AI-Augmented Development
 11.1 `Metadata`: Each module includes `MODULE.yaml` with exports, dependencies, telemetry keys for AI ingestion.

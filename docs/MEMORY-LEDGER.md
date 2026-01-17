@@ -36,6 +36,16 @@ Actions:
 - ACTION: Updated SPECIFICATION.MD §§10 & 16 plus TODO ledger to capture the template and `.github` directive for future agents.
 
 ---
+EntryId: MEM-20260118-03
+Timestamp: 2026-01-18T01:25:00Z
+Scope: Workflow;Pull Requests
+Summary: Added SPEC §10.12 requiring every PR handoff to include the GitHub compare URL so reviewers can open the diff immediately.
+Decisions:
+- DECISION: Whenever someone is asked to open a PR, they must cite the exact compare link `https://github.com/crt-dot-soluble/afk-simulator/compare/main...feature/<todo-id>-<slug>`.
+Actions:
+- ACTION: Updated SPECIFICATION.MD, TODO ledger, and this memory log to capture the compare-link directive for future agents.
+
+---
 EntryId: MEM-20260117-05
 Timestamp: 2026-01-17T23:50:00Z
 Scope: Module Views;Mission Control;Leaderboard/Sessions
