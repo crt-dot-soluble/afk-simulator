@@ -1,15 +1,25 @@
 ﻿@inherits LayoutComponentBase
 
 <div class="app-shell">
-    <header class="shell__bar">
-        <div class="shell__brand">
-            <span class="shell__title">AFK Simulator Engine</span>
-            <small>Deterministic idle core · GPU ready</small>
+    <aside class="shell__ribbon" aria-label="Primary navigation">
+        <div class="ribbon__branding">
+            <span class="ribbon__logo">AFK</span>
+            <small>Mission Control</small>
         </div>
-        <NavMenu />
-    </header>
+        <div class="ribbon__nav-host">
+            <NavMenu/>
+        </div>
+    </aside>
 
-    <section class="shell__content">
-        @Body
-    </section>
+    <div class="shell__main">
+        <header class="shell__header">
+            <div>
+                <p>AFK Simulator Engine</p>
+                <small>Deterministic idle core · GPU ready</small>
+            </div>
+        </header>
+        <section class="shell__viewport">
+            @Body
+        </section>
+    </div>
 </div>
