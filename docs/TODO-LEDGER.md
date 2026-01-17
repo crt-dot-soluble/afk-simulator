@@ -39,13 +39,13 @@ Notes:Tracks ongoing investments in authoring tools that accelerate feature/cont
 
 ```
 ID:00000000-0000-0000-0000-000000000004
-Title:Account hangar and New Life provisioning
+Title:Universe foundry and character provisioning
 Status:InProgress
 Owner:github-actions
-Links:SPECIFICATION.MD#6|docs/WIKI.md#account-hangar--new-life-profiles
+Links:SPECIFICATION.MD#6|docs/WIKI.md#universe-foundry--character-profiles
 ChangeLog:
   - 2026-01-17T00:00:00Z: Added account services, developer module, HTTP APIs, Mission Control UI, and tests covering limits plus starter currency grants
-Notes:Implements pilot identities, hangar limits, and sprite-driven New Life profiles ready for future progression features.
+Notes:Implements pilot identities, universe limits, and sprite-driven character profiles ready for future progression features.
 ```
 
 ```
@@ -57,6 +57,19 @@ Links:SPECIFICATION.MD#10|SPECIFICATION.MD#16|scripts/
 ChangeLog:
   - 2026-01-16T00:00:00Z: Added developer/end-user launch scripts, enforced commit/branch standards, and hardened CI plus coverage expectations
 Notes:Ensures one-command local runs, deterministic CI, and machine-friendly history formatting.
+```
+
+```
+ID:00000000-0000-0000-0000-000000000006
+Title:Modular mission control views
+Status:InProgress
+Owner:github-actions
+Links:SPECIFICATION.MD#5.7|docs/WIKI.md#module-owned-views
+ChangeLog:
+  - 2026-01-17T21:00:00Z: Added form-capable module view blocks, migrated the Universe Foundry panel to AccountModule-owned documents, and taught the Blazor shell to route action payloads/context back to modules.
+  - 2026-01-17T23:00:00Z: Taught the client renderer to handle grid/action blocks, restyled module-view components, and moved the statistics overview onto the new grid document.
+  - 2026-01-17T23:50:00Z: Removed legacy leaderboard/session forms, routed pilot aliases through module-view context, and wired Mission Control actions to module-owned score + session commands only.
+Notes:Tracks the fully declarative dashboard effort so every module provides its own telemetry + input surfaces without bespoke Razor.
 ```
 
 ````

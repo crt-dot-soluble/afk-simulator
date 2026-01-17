@@ -1,263 +1,300 @@
 ﻿@page "/"
+@using System.Collections.Generic
+@using System.Globalization
+@using System.Linq
+@using System.Threading
+@using Engine.Client.Rendering
+@using Engine.Client.Services
+@using Engine.Core.Accounts
+@using Engine.Core.Contracts
 @inject GraphicsSettingsClient GraphicsClient
 @inject LeaderboardClient LeaderboardClient
 @inject SessionClient SessionClient
 @inject RenderLoopService RenderLoop
 @inject AccountClient AccountClient
+@inject StatisticsClient StatisticsClient
+@inject DashboardLayoutClient LayoutClient
+@inject ModuleViewClient ModuleViewClient
+@inject SpriteLibraryClient SpriteClient
+@inject NavigationManager Navigation
 @inject IJSRuntime JsRuntime
 @inject ClientErrorReporter ErrorReporter
+@inject RuntimeConfigClient RuntimeConfigClient
 
 @implements IAsyncDisposable
 
 <PageTitle>Mission Control</PageTitle>
 
-<main class="dashboard-grid">
-	@if (!string.IsNullOrWhiteSpace(_fatalError))
-	{
-		<section class="panel span-2 error-state">
+@if (_user is null)
+{
+	<section class="auth-gate" aria-label="Account onboarding">
+		<div class="auth-panel">
 			<header>
 				<div>
-					<p>Telemetry Offline</p>
-					<small>Resolve the issue, then retry syncing.</small>
+					<p>Link Your Pilot Identity</p>
+					<small>Create an account or sign in to access Mission Control.</small>
 				</div>
-				<button class="ghost" @onclick="RefreshAllAsync">Retry sync</button>
+				@if (IsDeveloperAutoLoginEnabled)
+				{
+					<span class="auth-badge">Developer mode</span>
+				}
 			</header>
-			<p>@_fatalError</p>
-		</section>
-	}
-	else if (!string.IsNullOrWhiteSpace(_statusError))
-	{
-		<section class="panel span-2 warning-state">
-			<header>
-				<div>
-					<p>Partial Degradation</p>
-					<small>Some panels are stale; retry once stable.</small>
-				</div>
-				<button class="ghost" @onclick="RefreshAllAsync">Retry sync</button>
-			</header>
-			<p>@_statusError</p>
-		</section>
-	}
-	<section class="panel span-2">
-		<header>
-			<div>
-				<p>Simulation View</p>
-				<small>@_currentSettings.TargetFps fps · @_currentSettings.GpuTier</small>
+			@if (!string.IsNullOrWhiteSpace(_authStatus))
+			{
+				<p class="auth-status">@_authStatus</p>
+			}
+			@if (!string.IsNullOrWhiteSpace(_authError))
+			{
+				<p class="auth-error">@_authError</p>
+			}
+			<div class="auth-columns">
+				<article>
+					<h3>Sign in</h3>
+					<div class="form-stack">
+						<label>Email</label>
+						<input type="email" @bind="_loginForm.Email" autocomplete="username"/>
+						<label>Password</label>
+						<input type="password" @bind="_loginForm.Password" autocomplete="current-password"/>
+					</div>
+					<button type="button" @onclick="LoginAsync" disabled="@_authBusy">Enter hangar</button>
+				</article>
+				<article>
+					<h3>Create account</h3>
+					<div class="form-stack">
+						<label>Display name</label>
+						<input type="text" maxlength="24" @bind="_signupForm.DisplayName" autocomplete="nickname"/>
+						<label>Email</label>
+						<input type="email" @bind="_signupForm.Email" autocomplete="email"/>
+						<label>Password</label>
+						<input type="password" @bind="_signupForm.Password" autocomplete="new-password"/>
+					</div>
+					<button type="button" @onclick="RegisterAsync" disabled="@_authBusy">Begin ascent</button>
+				</article>
 			</div>
-			<span>@_playerId</span>
-		</header>
-		<canvas class="render-surface" @ref="_canvasRef" width="512" height="512" aria-label="GPU preview"></canvas>
-		<footer>
-			<button class="ghost" @onclick="RefreshAllAsync">Refresh telemetry</button>
-		</footer>
+		</div>
 	</section>
-
-	<section class="panel span-2 account-hub">
-		<header>
-			<div>
-				<p>Account Hangar</p>
-				<small>Launch multi-life pilots with default loadouts</small>
-			</div>
-			<span>@(_user?.DisplayName ?? "Provisioning...")</span>
-		</header>
-		@if (_user is null)
+}
+else
+{
+	<main class="dashboard-grid" aria-label="Mission Control overview">
+		@if (!string.IsNullOrWhiteSpace(_fatalError))
 		{
-			<p class="account-placeholder">Provisioning pilot identity and syncing hangars...</p>
+			<section class="panel error-state full-span">
+				<header>
+					<div>
+						<p>Telemetry Offline</p>
+						<small>Resolve the issue, then retry syncing.</small>
+					</div>
+					<button class="ghost" @onclick="RefreshAllAsync">Retry sync</button>
+				</header>
+				<p>@_fatalError</p>
+			</section>
 		}
-		else
+		else if (!string.IsNullOrWhiteSpace(_statusError))
 		{
-			<div class="account-hub__grid">
-				<div class="account-column">
-					<h3>Hangars</h3>
-					<div class="account-chips">
-						@foreach (var account in _accounts)
-						{
-							var active = _selectedAccount?.Id == account.Id;
-								<button type="button" class="@BuildAccountChipClass(active)" @onclick="() => SelectAccountAsync(account)">
-								<strong>@account.Label</strong>
-								<small>@account.CreatedAt.ToLocalTime().ToString("MMM d · HH:mm")</small>
-							</button>
-						}
-						@if (_accounts.Count == 0)
-						{
-							<p class="account-placeholder">No hangars yet. Create one to mint your first New Life.</p>
-						}
+			<section class="panel warning-state full-span">
+				<header>
+					<div>
+						<p>Partial Degradation</p>
+						<small>Some panels are stale; retry once stable.</small>
 					</div>
-					<div class="form-inline account-form">
-						<input type="text" maxlength="32" @bind="_accountLabelDraft" placeholder="Hangar label" />
-						<button type="button" @onclick="CreateUserAccountAsync" disabled="@_accountBusy">Launch hangar</button>
-					</div>
-					@if (!string.IsNullOrWhiteSpace(_accountError))
-					{
-						<p class="account-error">@_accountError</p>
-					}
-				</div>
-				<div class="account-column">
-					<h3>New Life Profiles</h3>
-					<div class="profile-grid">
-						@if (_selectedAccount is null)
+					<button class="ghost" @onclick="RefreshAllAsync">Retry sync</button>
+				</header>
+				<p>@_statusError</p>
+			</section>
+		}
+
+		@foreach (var panel in _dashboardPanels)
+		{
+			<section @key="panel.Id" class="@BuildPanelClass(panel)" style="@BuildPanelStyle(panel)" data-zone="@panel.Zone">
+				@switch (panel.Id)
+				{
+					case DashboardViewIds.Simulation:
+						<header>
+							<div>
+								<p>@panel.Title</p>
+								<small>@_currentSettings.TargetFps fps · @_currentSettings.GpuTier</small>
+							</div>
+							<div class="simulation-meta">
+								<span>@_playerId</span>
+								<span>@GetActiveSkillName()</span>
+							</div>
+						</header>
+						<canvas class="render-surface" @ref="_canvasRef" width="512" height="512" aria-label="GPU preview"></canvas>
+						<footer>
+							<button class="ghost" @onclick="RefreshAllAsync">Refresh telemetry</button>
+							<span class="rate-pill">@GetActiveSkillRate()</span>
+						</footer>
+						break;
+					case DashboardViewIds.Statistics:
+						@if (_moduleViewDocuments.TryGetValue(panel.Id, out var statisticsDocument))
 						{
-							<p class="account-placeholder">Select a hangar to view its lives.</p>
-						}
-						else if (_profiles.Count == 0)
-						{
-							<p class="account-placeholder">No lives minted yet. Launch a new one to receive starter gear.</p>
+							<ModuleViewPanel Document="statisticsDocument"
+							                 OnSelection="HandleModuleSelectionAsync"
+							                 OnAction="HandleModuleActionAsync"/>
 						}
 						else
 						{
-							@foreach (var profile in _profiles)
-							{
-								<article class="profile-card">
-									<img src="@ResolveSprite(profile.SpriteAssetId)" alt="@profile.Name artwork" />
-									<div class="profile-card__header">
-										<strong>@profile.Name</strong>
-										<small>@profile.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")</small>
-									</div>
-									<ul class="profile-economy">
-										<li>
-											<span>Base</span>
-											<strong>@profile.BaseCurrency.ToString("N0")</strong>
-										</li>
-										<li>
-											<span>Shards</span>
-											<strong>@profile.PremiumCurrency.ToString("N0")</strong>
-										</li>
-									</ul>
-									<div class="equipment-grid">
-										@foreach (var slot in EnumerateEquipment(profile.Equipment))
-										{
-											<span>
-												<em>@slot.Label</em>
-												@slot.Value
-											</span>
-										}
-									</div>
-								</article>
-							}
+							<header>
+								<div>
+									<p>@panel.Title</p>
+									<small>Tracking deterministic telemetry</small>
+								</div>
+								<span class="rate-pill">@GetActiveSkillRate()</span>
+							</header>
+							<p class="panel-placeholder">Statistics module has not provided a view yet.</p>
 						}
-					</div>
-					<div class="form-inline account-form">
-						<input type="text" maxlength="32" @bind="_profileNameDraft" placeholder="New Life codename" />
-						<button type="button" @onclick="CreateProfileAsync" disabled="@(_accountBusy || _selectedAccount is null)">Launch New Life</button>
-					</div>
-				</div>
-			</div>
+
+						break;
+					case DashboardViewIds.AccountUniverse:
+						@if (_moduleViewDocuments.TryGetValue(panel.Id, out var accountDocument))
+						{
+							<ModuleViewPanel Document="accountDocument"
+							                 OnSelection="HandleModuleSelectionAsync"
+							                 OnAction="HandleModuleActionAsync"/>
+						}
+						else
+						{
+							<header>
+								<div>
+									<p>@panel.Title</p>
+									<small>Spin up universes and mint characters</small>
+								</div>
+							</header>
+							<p class="panel-placeholder">Account module has not provided a view yet.</p>
+						}
+
+						break;
+					case DashboardViewIds.Graphics:
+						@if (_moduleViewDocuments.TryGetValue(panel.Id, out var graphicsDocument))
+						{
+							<ModuleViewPanel Document="graphicsDocument"
+							                 OnSelection="HandleModuleSelectionAsync"
+							                 OnAction="HandleModuleActionAsync"/>
+						}
+						else
+						{
+							<header>
+								<div>
+									<p>@panel.Title</p>
+									<small>Graphics, audio, and misc controls relocated</small>
+								</div>
+							</header>
+							<div class="panel-placeholder">
+								<p>All tuning controls now live on the Settings page for a focused workflow.</p>
+								<NavLink class="ghost" href="/settings">Open Settings</NavLink>
+							</div>
+						}
+
+						break;
+					case DashboardViewIds.Leaderboard:
+						@if (_moduleViewDocuments.TryGetValue(panel.Id, out var leaderboardDocument))
+						{
+							<ModuleViewPanel Document="leaderboardDocument"
+							                 OnSelection="HandleModuleSelectionAsync"
+							                 OnAction="HandleModuleActionAsync"/>
+						}
+						else
+						{
+							<header>
+								<div>
+									<p>@panel.Title</p>
+									<small>Real-time scores pushed via SignalR</small>
+								</div>
+							</header>
+							<p class="panel-placeholder">Leaderboard module has not provided a view yet.</p>
+						}
+
+						break;
+					case DashboardViewIds.Sessions:
+						@if (_moduleViewDocuments.TryGetValue(panel.Id, out var sessionsDocument))
+						{
+							<ModuleViewPanel Document="sessionsDocument"
+							                 OnSelection="HandleModuleSelectionAsync"
+							                 OnAction="HandleModuleActionAsync"/>
+						}
+						else
+						{
+							<header>
+								<div>
+									<p>@panel.Title</p>
+									<small>Authoritative instancing overview</small>
+								</div>
+							</header>
+							<p class="panel-placeholder">Sessions module has not provided a view yet.</p>
+						}
+
+						break;
+					default:
+						<header>
+							<div>
+								<p>@panel.Title</p>
+								<small>@panel.Description</small>
+							</div>
+						</header>
+						<p class="panel-placeholder">Module '@panel.Module' has not provided a client view yet.</p>
+						break;
+				}
+			</section>
 		}
-	</section>
-
-	<section class="panel">
-		<header>
-			<div>
-				<p>Graphics Controls</p>
-				<small>GPU tier tuning & pixel density</small>
-			</div>
-		</header>
-		<EditForm Model="_graphicsDraft" OnValidSubmit="ApplyGraphicsAsync">
-			<div class="form-grid">
-				<label>Target FPS</label>
-				<InputNumber @bind-Value="_graphicsDraft.TargetFps" min="30" max="240" />
-
-				<label>Resolution Scale</label>
-				<InputNumber @bind-Value="_graphicsDraft.ResolutionScale" step="0.1" min="0.25" max="2.5" />
-
-				<label>Particle Density</label>
-				<InputNumber @bind-Value="_graphicsDraft.ParticleDensity" min="0" max="100" />
-
-				<label>Sprite Smoothing</label>
-				<InputCheckbox @bind-Value="_graphicsDraft.SpriteSmoothing" />
-
-				<label>GPU Tier</label>
-				<InputSelect @bind-Value="_graphicsDraft.GpuTier">
-					<option value="tier1">Tier 1 · Low power</option>
-					<option value="tier2">Tier 2 · Balanced</option>
-					<option value="tier3">Tier 3 · Performance</option>
-				</InputSelect>
-			</div>
-			<div class="form-actions">
-				<button type="submit" disabled="@_busy">Apply</button>
-				<button type="button" class="ghost" @onclick="ResetGraphics" disabled="@_busy">Reset</button>
-			</div>
-		</EditForm>
-	</section>
-
-	<section class="panel">
-		<header>
-			<div>
-				<p>Global Leaderboard</p>
-				<small>Real-time scores pushed via SignalR</small>
-			</div>
-			<button class="ghost" @onclick="RefreshLeaderboardAsync">Sync</button>
-		</header>
-		<ol class="leaderboard">
-			@foreach (var (entry, index) in _leaderboard.Select((value, index) => (value, index)))
-			{
-				<li>
-					<span>@(index + 1).</span>
-					<strong>@entry.DisplayName</strong>
-					<em>@entry.Score.ToString("N0")</em>
-				</li>
-			}
-		</ol>
-		<div class="form-inline">
-			<input type="number" min="0" @bind="_pendingScore" />
-			<button @onclick="SubmitScoreAsync">Submit score</button>
-		</div>
-	</section>
-
-	<section class="panel">
-		<header>
-			<div>
-				<p>Multiplayer Sessions</p>
-				<small>Authoritative instancing overview</small>
-			</div>
-			<button class="ghost" @onclick="RefreshSessionsAsync">Refresh</button>
-		</header>
-		<ul class="session-list">
-			@foreach (var session in _sessions)
-			{
-				<li>
-					<div>
-						<strong>@session.Name</strong>
-						<small>@session.PlayerCount players</small>
-					</div>
-					<button @onclick="async () => await JoinSessionAsync(session.Id)">Join</button>
-				</li>
-			}
-		</ul>
-		<div class="form-inline">
-			<input type="text" maxlength="24" @bind="_newSessionName" />
-			<button @onclick="CreateSessionAsync">Spawn session</button>
-		</div>
-	</section>
-</main>
+	</main>
+}
 
 @code {
+	private const string DefaultSpriteId = "avatars/ember-nomad";
+	private const string DefaultSkillAccent = "#72f5ff";
+
+	private static readonly IReadOnlyDictionary<string, string> SpriteFallbacks =
+		new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+		{
+			[DefaultSpriteId] = "images/avatars/ember-nomad.svg"
+		};
+
+	private static readonly IReadOnlyDictionary<string, int> ZoneOrdering =
+		new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+		{
+			[DashboardViewZones.Hero] = 0,
+			[DashboardViewZones.Primary] = 1,
+			[DashboardViewZones.Secondary] = 2
+		};
+
+	private bool IsDeveloperAutoLoginEnabled =>
+		_runtimeConfig.DeveloperAutoLoginEnabled && _runtimeConfig.DeveloperAutoLogin is not null;
+
 	private RenderSettings _currentSettings = RenderSettings.Balanced;
-	private RenderSettingsDraft _graphicsDraft = RenderSettingsDraft.From(RenderSettings.Balanced);
-	private IReadOnlyList<LeaderboardEntry> _leaderboard = Array.Empty<LeaderboardEntry>();
-	private IReadOnlyList<SessionDescriptor> _sessions = Array.Empty<SessionDescriptor>();
-	private IReadOnlyList<AccountRecord> _accounts = Array.Empty<AccountRecord>();
-	private IReadOnlyList<CharacterProfileRecord> _profiles = Array.Empty<CharacterProfileRecord>();
-	private AccountRecord? _selectedAccount;
+	private IReadOnlyList<UniverseRecord> _universes = Array.Empty<UniverseRecord>();
+	private IReadOnlyList<CharacterRecord> _characters = Array.Empty<CharacterRecord>();
+	private IReadOnlyList<DashboardViewDescriptorDto> _dashboardPanels = Array.Empty<DashboardViewDescriptorDto>();
+
+	private IReadOnlyDictionary<string, ModuleViewDocument> _moduleViewDocuments =
+		new Dictionary<string, ModuleViewDocument>(StringComparer.OrdinalIgnoreCase);
+
+	private StatisticsSnapshotDto _statistics = new();
+	private AccountWalletSnapshotDto _walletSnapshot = new();
+	private RuntimeConfigDto _runtimeConfig = new();
+	private UniverseRecord? _selectedUniverse;
 	private UserRecord? _user;
-	private string _accountLabelDraft = "Starborn Vault";
-	private string _profileNameDraft = "New Life";
-	private string _newSessionName = "Echo Node";
+	private SpriteDefinitionDto? _spriteDefinition;
+	private SpriteAnimationDescriptor? _heroAnimation;
 	private string _playerId = GeneratePilotId();
-	private double _pendingScore = 1000;
+	private double _skillCurrencyBuffer;
+	private double _lastSkillCurrencyTotal;
 	private bool _busy;
-	private bool _accountBusy;
-	private string? _accountError;
+	private bool _universeBusy;
+	private bool _runtimeConfigLoaded;
+	private string? _universeError;
 	private ElementReference _canvasRef;
 	private bool _renderReady;
 	private string? _fatalError;
 	private string? _statusError;
-
-	private static readonly IReadOnlyDictionary<string, string> SpriteLibrary =
-		new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-		{
-			["avatars/ember-nomad"] = "images/avatars/ember-nomad.svg"
-		};
+	private CancellationTokenSource? _statisticsLoopCts;
+	private Task? _statisticsLoopTask;
+	private bool _authBusy;
+	private string? _authError;
+	private string? _authStatus;
+	private WalletTab _walletTab = WalletTab.Account;
+	private LoginFormModel _loginForm = new();
+	private SignupFormModel _signupForm = new();
 
 	protected override async Task OnInitializedAsync()
 	{
@@ -277,7 +314,7 @@
 		{
 			try
 			{
-				await RenderLoop.InitializeAsync(_canvasRef, _currentSettings);
+				await RenderLoop.InitializeAsync(_canvasRef, _currentSettings, _heroAnimation);
 			}
 			catch (Exception ex)
 			{
@@ -296,21 +333,41 @@
 		_busy = true;
 		try
 		{
+			await EnsureRuntimeConfigAsync();
 			await EnsureUserAsync();
+			if (_user is null)
+			{
+				return;
+			}
+
 			var graphicsTask = GraphicsClient.GetAsync();
-			var leaderboardTask = LeaderboardClient.GetAsync();
-			var sessionsTask = SessionClient.ListAsync();
-			var accountsTask = RefreshAccountDataAsync();
+			var universeTask = RefreshUniverseDataAsync();
+			var layoutTask = LayoutClient.ListAsync();
+			var statisticsTask = StatisticsClient.GetSnapshotAsync();
+			var spriteTask = SpriteClient.GetAsync(DefaultSpriteId);
+			var moduleViewTask = ModuleViewClient.ListAsync(_user.Id, BuildModuleViewParameters());
 
 			_currentSettings = await graphicsTask;
-			_graphicsDraft = RenderSettingsDraft.From(_currentSettings);
-			_leaderboard = await leaderboardTask;
-			_sessions = await sessionsTask;
-			await accountsTask;
+			await universeTask;
+			await RefreshWalletSnapshotAsync();
+
+			var layouts = await layoutTask;
+			_dashboardPanels = SortPanels(EnsureDefaultPanels(layouts));
+			_statistics = await statisticsTask;
+			_lastSkillCurrencyTotal = _statistics.TotalSkillCurrency;
+			_spriteDefinition = await spriteTask;
+			var moduleViews = await moduleViewTask;
+			_moduleViewDocuments = BuildModuleViewLookup(moduleViews);
+			UpdateHeroAnimation();
+			if (_heroAnimation is not null)
+			{
+				await RenderLoop.PlayAnimationAsync(_heroAnimation);
+			}
 
 			_fatalError = null;
 			_statusError = null;
 			_renderReady = true;
+			EnsureStatisticsRefreshLoop();
 		}
 		catch (Exception ex)
 		{
@@ -323,34 +380,41 @@
 		}
 	}
 
-	private async Task ApplyGraphicsAsync()
+	private async Task RefreshModuleViewsAsync(CancellationToken cancellationToken = default)
 	{
-		if (_busy)
+		if (_user is null)
+		{
+			_moduleViewDocuments = new Dictionary<string, ModuleViewDocument>(StringComparer.OrdinalIgnoreCase);
+			return;
+		}
+
+		try
+		{
+			var documents = await ModuleViewClient.ListAsync(_user.Id, BuildModuleViewParameters(), cancellationToken);
+			_moduleViewDocuments = BuildModuleViewLookup(documents);
+		}
+		catch (Exception ex)
+		{
+			await HandleErrorAsync(nameof(RefreshModuleViewsAsync), ex, fatal: false, updateStatus: false);
+		}
+	}
+
+	private async Task EnsureRuntimeConfigAsync()
+	{
+		if (_runtimeConfigLoaded)
 		{
 			return;
 		}
 
-		_busy = true;
 		try
 		{
-			var updated = _graphicsDraft.ToRenderSettings();
-			_currentSettings = await GraphicsClient.UpdateAsync(updated);
-			await RenderLoop.UpdateSettingsAsync(_currentSettings);
-			_statusError = null;
+			_runtimeConfig = await RuntimeConfigClient.GetAsync();
+			_runtimeConfigLoaded = true;
 		}
 		catch (Exception ex)
 		{
-			await HandleErrorAsync(nameof(ApplyGraphicsAsync), ex);
+			await HandleErrorAsync(nameof(EnsureRuntimeConfigAsync), ex, fatal: true);
 		}
-		finally
-		{
-			_busy = false;
-		}
-	}
-
-	private void ResetGraphics()
-	{
-		_graphicsDraft = RenderSettingsDraft.From(RenderSettings.Balanced);
 	}
 
 	private async Task EnsureUserAsync()
@@ -367,7 +431,7 @@
 		}
 		catch
 		{
-			// Storage unavailable; proceed with a fresh identity.
+			// Storage unavailable; proceed with interactive auth.
 		}
 
 		if (!string.IsNullOrWhiteSpace(storedId))
@@ -377,30 +441,152 @@
 				var existing = await AccountClient.GetUserAsync(storedId);
 				if (existing is not null)
 				{
-					_user = existing;
+					await OnUserAuthenticatedAsync(existing, persist: false);
 					return;
 				}
 			}
 			catch (AccountClientException ex)
 			{
-				_accountError ??= ex.Message;
+				_universeError ??= ex.Message;
 				await HandleErrorAsync(nameof(EnsureUserAsync), ex, updateStatus: false);
 			}
 		}
 
+		if (IsDeveloperAutoLoginEnabled)
+		{
+			await AutoLoginDeveloperAsync();
+		}
+	}
+
+	private async Task AutoLoginDeveloperAsync()
+	{
+		if (!IsDeveloperAutoLoginEnabled || _runtimeConfig.DeveloperAutoLogin is null)
+		{
+			return;
+		}
+
+		if (_authBusy)
+		{
+			return;
+		}
+
+		_authBusy = true;
+		_authStatus = "Provisioning developer account...";
+		_authError = null;
 		try
 		{
-			var suffix = Guid.NewGuid().ToString("N")[..6];
-			var alias = $"wanderer-{suffix}";
-			var created = await AccountClient.CreateUserAsync(alias);
-			_user = created;
-			await PersistUserIdAsync(created.Id);
-			_accountError = null;
+			var descriptor = _runtimeConfig.DeveloperAutoLogin;
+			var user = await AccountClient.AuthenticateAsync(descriptor.Email, descriptor.Password);
+			if (user is null)
+			{
+				user = await AccountClient.RegisterUserAsync(descriptor.Email, descriptor.Password,
+					descriptor.DisplayName);
+			}
+
+			await OnUserAuthenticatedAsync(user);
+			_authStatus = null;
 		}
 		catch (AccountClientException ex)
 		{
-			_accountError = ex.Message;
-			await HandleErrorAsync(nameof(EnsureUserAsync), ex, updateStatus: false);
+			_authError = ex.Message;
+			await HandleErrorAsync(nameof(AutoLoginDeveloperAsync), ex, updateStatus: false);
+		}
+		finally
+		{
+			_authBusy = false;
+		}
+	}
+
+	private async Task OnUserAuthenticatedAsync(UserRecord user, bool persist = true)
+	{
+		_user = user;
+		_authError = null;
+		_authStatus = null;
+		if (persist)
+		{
+			await PersistUserIdAsync(user.Id);
+		}
+
+		_skillCurrencyBuffer = 0;
+		_lastSkillCurrencyTotal = _statistics.TotalSkillCurrency;
+		await RefreshUniverseDataAsync();
+		await RefreshWalletSnapshotAsync();
+	}
+
+	private async Task LoginAsync()
+	{
+		if (_authBusy)
+		{
+			return;
+		}
+
+		_authBusy = true;
+		_authError = null;
+		try
+		{
+			if (string.IsNullOrWhiteSpace(_loginForm.Email) || string.IsNullOrWhiteSpace(_loginForm.Password))
+			{
+				_authError = "Email and password are required.";
+				return;
+			}
+
+			var email = _loginForm.Email.Trim();
+			var password = _loginForm.Password.Trim();
+			var user = await AccountClient.AuthenticateAsync(email, password);
+			if (user is null)
+			{
+				_authError = "Invalid credentials.";
+				return;
+			}
+
+			await OnUserAuthenticatedAsync(user);
+			await RefreshAllAsync();
+		}
+		catch (AccountClientException ex)
+		{
+			_authError = ex.Message;
+			await HandleErrorAsync(nameof(LoginAsync), ex, updateStatus: false);
+		}
+		finally
+		{
+			_authBusy = false;
+		}
+	}
+
+	private async Task RegisterAsync()
+	{
+		if (_authBusy)
+		{
+			return;
+		}
+
+		_authBusy = true;
+		_authError = null;
+		try
+		{
+			if (string.IsNullOrWhiteSpace(_signupForm.DisplayName) ||
+			    string.IsNullOrWhiteSpace(_signupForm.Email) ||
+			    string.IsNullOrWhiteSpace(_signupForm.Password))
+			{
+				_authError = "Display name, email, and password are required.";
+				return;
+			}
+
+			var displayName = _signupForm.DisplayName.Trim();
+			var email = _signupForm.Email.Trim();
+			var password = _signupForm.Password.Trim();
+			var user = await AccountClient.RegisterUserAsync(email, password, displayName);
+			await OnUserAuthenticatedAsync(user);
+			await RefreshAllAsync();
+		}
+		catch (AccountClientException ex)
+		{
+			_authError = ex.Message;
+			await HandleErrorAsync(nameof(RegisterAsync), ex, updateStatus: false);
+		}
+		finally
+		{
+			_authBusy = false;
 		}
 	}
 
@@ -416,136 +602,143 @@
 		}
 	}
 
-	private async Task RefreshAccountDataAsync()
+	private async Task RefreshUniverseDataAsync()
 	{
 		if (_user is null)
 		{
-			_accounts = Array.Empty<AccountRecord>();
-			_profiles = Array.Empty<CharacterProfileRecord>();
+			_universes = Array.Empty<UniverseRecord>();
+			_characters = Array.Empty<CharacterRecord>();
 			return;
 		}
 
 		try
 		{
-			var accounts = await AccountClient.GetAccountsAsync(_user.Id);
-			_accounts = accounts;
-			if (_selectedAccount is null || !_accounts.Any(a => a.Id == _selectedAccount.Id))
+			var universes = await AccountClient.GetUniversesAsync(_user.Id);
+			_universes = universes;
+			if (_selectedUniverse is null || !_universes.Any(u => u.Id == _selectedUniverse.Id))
 			{
-				_selectedAccount = _accounts.FirstOrDefault();
+				_selectedUniverse = _universes.FirstOrDefault();
 			}
 
-			if (_selectedAccount is not null)
+			if (_selectedUniverse is not null)
 			{
-				_profiles = await AccountClient.GetProfilesAsync(_selectedAccount.Id);
+				_characters = await AccountClient.GetCharactersAsync(_selectedUniverse.Id);
 			}
 			else
 			{
-				_profiles = Array.Empty<CharacterProfileRecord>();
+				_characters = Array.Empty<CharacterRecord>();
 			}
 
-			_accountError = null;
+			_universeError = null;
 		}
 		catch (AccountClientException ex)
 		{
-			_accountError = ex.Message;
-			_profiles = Array.Empty<CharacterProfileRecord>();
-			await HandleErrorAsync(nameof(RefreshAccountDataAsync), ex, updateStatus: false);
+			_universeError = ex.Message;
+			_characters = Array.Empty<CharacterRecord>();
+			await HandleErrorAsync(nameof(RefreshUniverseDataAsync), ex, updateStatus: false);
 		}
 	}
 
-	private async Task SelectAccountAsync(AccountRecord account)
+	private async Task RefreshWalletSnapshotAsync()
 	{
-		if (_selectedAccount?.Id == account.Id)
+		if (_user is null)
 		{
-			return;
-		}
-
-		_selectedAccount = account;
-		await LoadProfilesForSelectionAsync();
-	}
-
-	private async Task LoadProfilesForSelectionAsync()
-	{
-		if (_selectedAccount is null)
-		{
-			_profiles = Array.Empty<CharacterProfileRecord>();
+			_walletSnapshot = new AccountWalletSnapshotDto();
 			return;
 		}
 
 		try
 		{
-			_profiles = await AccountClient.GetProfilesAsync(_selectedAccount.Id);
-			_accountError = null;
+			_walletSnapshot = await AccountClient.GetWalletsAsync(_user.Id);
 		}
 		catch (AccountClientException ex)
 		{
-			_accountError = ex.Message;
-			await HandleErrorAsync(nameof(LoadProfilesForSelectionAsync), ex, updateStatus: false);
+			await HandleErrorAsync(nameof(RefreshWalletSnapshotAsync), ex, updateStatus: false);
 		}
 	}
 
-	private async Task CreateUserAccountAsync()
+	private async Task LoadCharactersForSelectionAsync()
 	{
-		if (_user is null || _accountBusy)
+		if (_selectedUniverse is null)
+		{
+			_characters = Array.Empty<CharacterRecord>();
+			return;
+		}
+
+		try
+		{
+			_characters = await AccountClient.GetCharactersAsync(_selectedUniverse.Id);
+			_universeError = null;
+		}
+		catch (AccountClientException ex)
+		{
+			_universeError = ex.Message;
+			await HandleErrorAsync(nameof(LoadCharactersForSelectionAsync), ex, updateStatus: false);
+		}
+	}
+
+	private async Task CreateUniverseAsync(string? requestedName = null)
+	{
+		if (_user is null || _universeBusy)
 		{
 			return;
 		}
 
-		_accountBusy = true;
+		_universeBusy = true;
 		try
 		{
-			var label = string.IsNullOrWhiteSpace(_accountLabelDraft)
-				? $"Hangar {_accounts.Count + 1}"
-				: _accountLabelDraft.Trim();
-			var account = await AccountClient.CreateAccountAsync(_user.Id, label);
-			_selectedAccount = account;
-			_accountLabelDraft = string.Empty;
-			await RefreshAccountDataAsync();
+			var name = string.IsNullOrWhiteSpace(requestedName)
+				? $"Universe {_universes.Count + 1}"
+				: requestedName.Trim();
+			var universe = await AccountClient.CreateUniverseAsync(_user.Id, name);
+			_selectedUniverse = universe;
+			await RefreshUniverseDataAsync();
+			await RefreshWalletSnapshotAsync();
 		}
 		catch (AccountClientException ex)
 		{
-			_accountError = ex.Message;
-			await HandleErrorAsync(nameof(CreateUserAccountAsync), ex, updateStatus: false);
+			_universeError = ex.Message;
+			await HandleErrorAsync(nameof(CreateUniverseAsync), ex, updateStatus: false);
 		}
 		catch (Exception ex)
 		{
-			_accountError ??= "Unexpected error while creating a hangar.";
-			await HandleErrorAsync(nameof(CreateUserAccountAsync), ex);
+			_universeError ??= "Unexpected error while creating a universe.";
+			await HandleErrorAsync(nameof(CreateUniverseAsync), ex);
 		}
 		finally
 		{
-			_accountBusy = false;
+			_universeBusy = false;
 		}
 	}
 
-	private async Task CreateProfileAsync()
+	private async Task CreateCharacterAsync(string? requestedName = null)
 	{
-		if (_selectedAccount is null || _accountBusy)
+		if (_selectedUniverse is null || _universeBusy)
 		{
 			return;
 		}
 
-		_accountBusy = true;
+		_universeBusy = true;
 		try
 		{
-			var name = string.IsNullOrWhiteSpace(_profileNameDraft) ? null : _profileNameDraft.Trim();
-			await AccountClient.CreateProfileAsync(_selectedAccount.Id, name);
-			_profileNameDraft = "New Life";
-			await LoadProfilesForSelectionAsync();
+			var name = string.IsNullOrWhiteSpace(requestedName) ? null : requestedName.Trim();
+			await AccountClient.CreateCharacterAsync(_selectedUniverse.Id, name);
+			await LoadCharactersForSelectionAsync();
+			await RefreshWalletSnapshotAsync();
 		}
 		catch (AccountClientException ex)
 		{
-			_accountError = ex.Message;
-			await HandleErrorAsync(nameof(CreateProfileAsync), ex, updateStatus: false);
+			_universeError = ex.Message;
+			await HandleErrorAsync(nameof(CreateCharacterAsync), ex, updateStatus: false);
 		}
 		catch (Exception ex)
 		{
-			_accountError ??= "Unexpected error while creating a profile.";
-			await HandleErrorAsync(nameof(CreateProfileAsync), ex);
+			_universeError ??= "Unexpected error while creating a character.";
+			await HandleErrorAsync(nameof(CreateCharacterAsync), ex);
 		}
 		finally
 		{
-			_accountBusy = false;
+			_universeBusy = false;
 		}
 	}
 
@@ -553,8 +746,8 @@
 	{
 		try
 		{
-			_leaderboard = await LeaderboardClient.GetAsync();
 			_statusError = null;
+			await RefreshModuleViewsAsync();
 		}
 		catch (Exception ex)
 		{
@@ -562,12 +755,12 @@
 		}
 	}
 
-	private async Task SubmitScoreAsync()
+	private async Task SubmitScoreAsync(string displayName, double requestedScore)
 	{
 		try
 		{
-			var score = Math.Max(0, _pendingScore);
-			await LeaderboardClient.SubmitAsync(_playerId, _playerId, score);
+			var score = Math.Max(0d, requestedScore);
+			await LeaderboardClient.SubmitAsync(_playerId, displayName, score);
 			await RefreshLeaderboardAsync();
 		}
 		catch (Exception ex)
@@ -580,8 +773,8 @@
 	{
 		try
 		{
-			_sessions = await SessionClient.ListAsync();
 			_statusError = null;
+			await RefreshModuleViewsAsync();
 		}
 		catch (Exception ex)
 		{
@@ -589,16 +782,15 @@
 		}
 	}
 
-	private async Task CreateSessionAsync()
+	private async Task CreateSessionAsync(string? requestedName = null)
 	{
-		if (string.IsNullOrWhiteSpace(_newSessionName))
-		{
-			_newSessionName = "Untitled Node";
-		}
+		var sessionName = string.IsNullOrWhiteSpace(requestedName)
+			? $"Node {DateTimeOffset.Now:HHmmss}"
+			: requestedName.Trim();
 
 		try
 		{
-			await SessionClient.CreateAsync(_newSessionName);
+			await SessionClient.CreateAsync(sessionName);
 			await RefreshSessionsAsync();
 		}
 		catch (Exception ex)
@@ -620,8 +812,147 @@
 		}
 	}
 
+	private void EnsureStatisticsRefreshLoop()
+	{
+		if (_statisticsLoopTask is { IsCompleted: false })
+		{
+			return;
+		}
+
+		_statisticsLoopCts?.Cancel();
+		_statisticsLoopCts?.Dispose();
+		_statisticsLoopCts = new CancellationTokenSource();
+		_statisticsLoopTask = RunStatisticsRefreshLoopAsync(_statisticsLoopCts.Token);
+	}
+
+	private async Task RunStatisticsRefreshLoopAsync(CancellationToken token)
+	{
+		using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+		try
+		{
+			while (await timer.WaitForNextTickAsync(token).ConfigureAwait(false))
+			{
+				StatisticsSnapshotDto? snapshot;
+				try
+				{
+					snapshot = await StatisticsClient.GetSnapshotAsync(token).ConfigureAwait(false);
+				}
+				catch (OperationCanceledException)
+				{
+					break;
+				}
+				catch (Exception ex)
+				{
+					await InvokeAsync(async () => { await HandleErrorAsync(nameof(RunStatisticsRefreshLoopAsync), ex, fatal: false, updateStatus: false); });
+					continue;
+				}
+
+				if (snapshot is null)
+				{
+					continue;
+				}
+
+				await TryDepositSkillCurrencyAsync(snapshot.TotalSkillCurrency, token).ConfigureAwait(false);
+
+				await InvokeAsync(() =>
+				{
+					_statistics = snapshot;
+					UpdateHeroAnimation();
+					StateHasChanged();
+					return Task.CompletedTask;
+				});
+			}
+		}
+		catch (OperationCanceledException)
+		{
+			// Graceful shutdown.
+		}
+	}
+
+	private async Task TryDepositSkillCurrencyAsync(double totalCurrency, CancellationToken token)
+	{
+		if (_user is null)
+		{
+			_skillCurrencyBuffer = 0;
+			_lastSkillCurrencyTotal = 0;
+			return;
+		}
+
+		if (totalCurrency <= _lastSkillCurrencyTotal)
+		{
+			return;
+		}
+
+		_skillCurrencyBuffer += totalCurrency - _lastSkillCurrencyTotal;
+		_lastSkillCurrencyTotal = totalCurrency;
+		if (_skillCurrencyBuffer < 1d)
+		{
+			return;
+		}
+
+		var grant = (long)Math.Floor(_skillCurrencyBuffer);
+		if (grant <= 0)
+		{
+			return;
+		}
+
+		var characterId = ResolveDepositCharacterId();
+		if (string.IsNullOrWhiteSpace(characterId))
+		{
+			return;
+		}
+
+		try
+		{
+			var snapshot = await AccountClient.DepositWalletAsync(_user.Id,
+				new WalletDepositDto
+				{
+					BaseCurrency = grant,
+					PremiumCurrency = 0,
+					CharacterId = characterId
+				}, token).ConfigureAwait(false);
+			_skillCurrencyBuffer -= grant;
+			await InvokeAsync(async () =>
+			{
+				_walletSnapshot = snapshot;
+				await LoadCharactersForSelectionAsync();
+				StateHasChanged();
+			});
+		}
+		catch (AccountClientException ex)
+		{
+			await HandleErrorAsync(nameof(TryDepositSkillCurrencyAsync), ex, updateStatus: false);
+		}
+	}
+
+	private string? ResolveDepositCharacterId()
+	{
+		if (_characters.Count > 0)
+		{
+			return _characters[0].Id;
+		}
+
+		var candidate = _walletSnapshot.Characters.FirstOrDefault();
+		return candidate?.CharacterId;
+	}
+
 	public async ValueTask DisposeAsync()
 	{
+		_statisticsLoopCts?.Cancel();
+		if (_statisticsLoopTask is not null)
+		{
+			try
+			{
+				await _statisticsLoopTask.ConfigureAwait(false);
+			}
+			catch (OperationCanceledException)
+			{
+				// Expected during disposal.
+			}
+		}
+
+		_statisticsLoopCts?.Dispose();
+		_statisticsLoopCts = null;
 		try
 		{
 			await RenderLoop.DisposeAsync();
@@ -663,35 +994,486 @@
 
 	private static string SlotValue(string? slot) => string.IsNullOrWhiteSpace(slot) ? "—" : slot!;
 
-	private static string ResolveSprite(string? spriteId)
+	private string ResolveSprite(string? spriteId)
 	{
-		if (!string.IsNullOrWhiteSpace(spriteId) && SpriteLibrary.TryGetValue(spriteId, out var value))
+		if (!string.IsNullOrWhiteSpace(spriteId))
 		{
-			return value;
+			if (string.Equals(spriteId, DefaultSpriteId, StringComparison.OrdinalIgnoreCase) &&
+			    _spriteDefinition is not null && !string.IsNullOrWhiteSpace(_spriteDefinition.AssetPath))
+			{
+				return NormalizeAssetPath(_spriteDefinition.AssetPath);
+			}
+
+			if (SpriteFallbacks.TryGetValue(spriteId, out var mapped))
+			{
+				return mapped;
+			}
 		}
 
-		return SpriteLibrary["avatars/ember-nomad"];
+		if (_spriteDefinition is not null && !string.IsNullOrWhiteSpace(_spriteDefinition.AssetPath))
+		{
+			return NormalizeAssetPath(_spriteDefinition.AssetPath);
+		}
+
+		return SpriteFallbacks[DefaultSpriteId];
 	}
 
-	private static string BuildAccountChipClass(bool isActive) => isActive ? "account-chip active" : "account-chip";
-
-	private sealed class RenderSettingsDraft
+	private static string NormalizeAssetPath(string path)
 	{
-		public int TargetFps { get; set; }
-		public double ResolutionScale { get; set; }
-		public int ParticleDensity { get; set; }
-		public bool SpriteSmoothing { get; set; }
-		public string GpuTier { get; set; } = "tier2";
-
-		public RenderSettings ToRenderSettings() => new(TargetFps, ResolutionScale, SpriteSmoothing, ParticleDensity, GpuTier);
-
-		public static RenderSettingsDraft From(RenderSettings settings) => new()
+		if (string.IsNullOrWhiteSpace(path))
 		{
-			TargetFps = settings.TargetFps,
-			ResolutionScale = settings.ResolutionScale,
-			ParticleDensity = settings.ParticleDensity,
-			SpriteSmoothing = settings.SpriteSmoothing,
-			GpuTier = settings.GpuTier
+			return string.Empty;
+		}
+
+		return path.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+			? path
+			: path.StartsWith('/')
+				? path
+				: $"/{path}";
+	}
+
+	private IReadOnlyList<DashboardViewDescriptorDto> EnsureDefaultPanels(IReadOnlyList<DashboardViewDescriptorDto> descriptors)
+	{
+		if (descriptors is null || descriptors.Count == 0)
+		{
+			return BuildDefaultPanels();
+		}
+
+		var panels = descriptors.ToList();
+		var existing = new HashSet<string>(descriptors.Select(p => p.Id), StringComparer.OrdinalIgnoreCase);
+		foreach (var fallback in BuildDefaultPanels())
+		{
+			if (existing.Add(fallback.Id))
+			{
+				panels.Add(fallback);
+			}
+		}
+
+		return panels;
+	}
+
+	private static IReadOnlyList<DashboardViewDescriptorDto> BuildDefaultPanels() => new[]
+	{
+		new DashboardViewDescriptorDto
+		{
+			Id = DashboardViewIds.Simulation,
+			Title = "Simulation View",
+			Description = "Hero viewport",
+			Zone = DashboardViewZones.Hero,
+			Order = 0,
+			ColumnSpan = 9,
+			Module = "Core"
+		},
+		new DashboardViewDescriptorDto
+		{
+			Id = DashboardViewIds.Statistics,
+			Title = "Statistics",
+			Description = "Stat overview",
+			Zone = DashboardViewZones.Primary,
+			Order = 20,
+			ColumnSpan = 4,
+			Module = "Statistics"
+		},
+		new DashboardViewDescriptorDto
+		{
+			Id = DashboardViewIds.AccountUniverse,
+			Title = "Universe Foundry",
+			Description = "Manage universes",
+			Zone = DashboardViewZones.Hero,
+			Order = 10,
+			ColumnSpan = 3,
+			Module = "Accounts"
+		},
+		new DashboardViewDescriptorDto
+		{
+			Id = DashboardViewIds.Graphics,
+			Title = "Graphics Controls",
+			Description = "GPU tuning",
+			Zone = DashboardViewZones.Secondary,
+			Order = 10,
+			ColumnSpan = 4,
+			Module = "Core"
+		},
+		new DashboardViewDescriptorDto
+		{
+			Id = DashboardViewIds.Leaderboard,
+			Title = "Global Leaderboard",
+			Description = "Live scores",
+			Zone = DashboardViewZones.Secondary,
+			Order = 20,
+			ColumnSpan = 4,
+			Module = "Core"
+		},
+		new DashboardViewDescriptorDto
+		{
+			Id = DashboardViewIds.Sessions,
+			Title = "Multiplayer Sessions",
+			Description = "Authoritative lobbies",
+			Zone = DashboardViewZones.Secondary,
+			Order = 30,
+			ColumnSpan = 4,
+			Module = "Core"
+		}
+	};
+
+	private IReadOnlyList<DashboardViewDescriptorDto> SortPanels(IEnumerable<DashboardViewDescriptorDto> panels)
+	{
+		return panels
+			.OrderBy(panel => ZoneOrdering.TryGetValue(panel.Zone, out var rank) ? rank : int.MaxValue)
+			.ThenBy(panel => panel.Order)
+			.ThenBy(panel => panel.Title, StringComparer.OrdinalIgnoreCase)
+			.ToArray();
+	}
+
+	private string BuildPanelClass(DashboardViewDescriptorDto panel)
+	{
+		var classes = new List<string> { "panel" };
+		if (string.Equals(panel.Zone, DashboardViewZones.Hero, StringComparison.OrdinalIgnoreCase))
+		{
+			classes.Add("panel-hero");
+		}
+
+		if (IsSimulationPanel(panel.Id))
+		{
+			classes.Add("panel-simulation");
+		}
+
+		if (IsCompactPanel(panel.Id))
+		{
+			classes.Add("panel-compact");
+		}
+
+		return string.Join(' ', classes);
+	}
+
+	private void SetWalletTab(WalletTab tab)
+	{
+		if (_walletTab == tab)
+		{
+			return;
+		}
+
+		_walletTab = tab;
+	}
+
+	private string BuildWalletTabClass(WalletTab tab) => _walletTab == tab ? "wallet-tab active" : "wallet-tab";
+
+	private static bool IsCompactPanel(string id) =>
+		string.Equals(id, DashboardViewIds.Leaderboard, StringComparison.OrdinalIgnoreCase) ||
+		string.Equals(id, DashboardViewIds.Graphics, StringComparison.OrdinalIgnoreCase);
+
+	private static bool IsSimulationPanel(string id) =>
+		string.Equals(id, DashboardViewIds.Simulation, StringComparison.OrdinalIgnoreCase);
+
+	private static string BuildPanelStyle(DashboardViewDescriptorDto panel)
+	{
+		var span = Math.Clamp(panel.ColumnSpan, 1, 12);
+		return $"grid-column: span {span};";
+	}
+
+	private IReadOnlyDictionary<string, string>? BuildModuleViewParameters()
+	{
+		var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+		{
+			["playerAlias"] = _playerId
+		};
+
+		if (_selectedUniverse is not null)
+		{
+			parameters["activeUniverseId"] = _selectedUniverse.Id;
+		}
+
+		return parameters;
+	}
+
+	private static IReadOnlyDictionary<string, ModuleViewDocument> BuildModuleViewLookup(
+		IReadOnlyList<ModuleViewDocument> documents)
+	{
+		if (documents == null || documents.Count == 0)
+		{
+			return new Dictionary<string, ModuleViewDocument>(StringComparer.OrdinalIgnoreCase);
+		}
+
+		return documents
+			.GroupBy(document => document.Descriptor.Id, StringComparer.OrdinalIgnoreCase)
+			.ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+	}
+
+	private IEnumerable<StatisticEntryDto> EnumerateStatisticEntries()
+	{
+		foreach (var space in _statistics.Namespaces)
+		{
+			foreach (var category in space.Categories)
+			{
+				foreach (var entry in category.Entries)
+				{
+					yield return entry;
+				}
+			}
+		}
+	}
+
+	private IEnumerable<StatisticEntryDto> EnumerateSkillEntries()
+	{
+		foreach (var entry in EnumerateStatisticEntries())
+		{
+			if (string.Equals(entry.Kind, StatisticEntryKindsDto.Skill, StringComparison.OrdinalIgnoreCase))
+			{
+				yield return entry;
+			}
+		}
+	}
+
+	private StatisticEntryDto? GetActiveSkillEntry()
+	{
+		if (!string.IsNullOrWhiteSpace(_statistics.ActiveSkillId))
+		{
+			foreach (var entry in EnumerateStatisticEntries())
+			{
+				if (string.Equals(entry.EntryId, _statistics.ActiveSkillId, StringComparison.OrdinalIgnoreCase))
+				{
+					return entry;
+				}
+			}
+		}
+
+		foreach (var entry in EnumerateSkillEntries())
+		{
+			if (entry.IsActive)
+			{
+				return entry;
+			}
+		}
+
+		foreach (var entry in EnumerateSkillEntries())
+		{
+			return entry;
+		}
+
+		return null;
+	}
+
+	private string BuildStatisticEntryClass(StatisticEntryDto entry)
+	{
+		var classes = new List<string> { "stat-entry" };
+		if (string.Equals(entry.Kind, StatisticEntryKindsDto.Skill, StringComparison.OrdinalIgnoreCase))
+		{
+			classes.Add("stat-entry-skill");
+		}
+
+		if (entry.IsActive)
+		{
+			classes.Add("active");
+		}
+
+		return string.Join(' ', classes);
+	}
+
+	private string GetActiveSkillName() => GetActiveSkillEntry()?.Name ?? "Idling";
+
+	private string GetActiveSkillRate()
+	{
+		var entry = GetActiveSkillEntry();
+		var rate = entry?.Value.CurrencyPerSecond ?? 0d;
+		return $"{rate.ToString("N1", CultureInfo.InvariantCulture)} c/s";
+	}
+
+	private Task HandleModuleSelectionAsync(ModuleViewSelection selection)
+	{
+		if (selection is null)
+		{
+			return Task.CompletedTask;
+		}
+
+		if (string.Equals(selection.DocumentId, DashboardViewIds.Statistics, StringComparison.OrdinalIgnoreCase) &&
+		    string.Equals(selection.BlockId, "statistics.skills", StringComparison.OrdinalIgnoreCase))
+		{
+			return ActivateSkillAsync(selection.ItemId);
+		}
+
+		if (string.Equals(selection.DocumentId, DashboardViewIds.AccountUniverse, StringComparison.OrdinalIgnoreCase) &&
+		    string.Equals(selection.BlockId, "accounts.universe.list", StringComparison.OrdinalIgnoreCase))
+		{
+			return HandleUniverseSelectionAsync(selection.ItemId);
+		}
+
+		if (string.Equals(selection.DocumentId, DashboardViewIds.Sessions, StringComparison.OrdinalIgnoreCase) &&
+		    string.Equals(selection.BlockId, "core.sessions.list", StringComparison.OrdinalIgnoreCase))
+		{
+			return JoinSessionAsync(selection.ItemId);
+		}
+
+		return Task.CompletedTask;
+	}
+
+	private async Task HandleUniverseSelectionAsync(string universeId)
+	{
+		if (string.IsNullOrWhiteSpace(universeId) || _selectedUniverse?.Id == universeId)
+		{
+			return;
+		}
+
+		var universe = _universes.FirstOrDefault(u =>
+			string.Equals(u.Id, universeId, StringComparison.OrdinalIgnoreCase));
+		if (universe is null)
+		{
+			await RefreshUniverseDataAsync();
+			universe = _universes.FirstOrDefault(u =>
+				string.Equals(u.Id, universeId, StringComparison.OrdinalIgnoreCase));
+			if (universe is null)
+			{
+				return;
+			}
+		}
+
+		_selectedUniverse = universe;
+		await LoadCharactersForSelectionAsync();
+		await RefreshModuleViewsAsync();
+	}
+
+	private Task HandleModuleActionAsync(ModuleViewActionRequest action)
+	{
+		if (action is null)
+		{
+			return Task.CompletedTask;
+		}
+
+		if (!string.IsNullOrWhiteSpace(action.Command) &&
+		    action.Command.StartsWith("navigate:", StringComparison.OrdinalIgnoreCase))
+		{
+			var target = action.Command[9..].Trim();
+			if (!string.IsNullOrWhiteSpace(target))
+			{
+				Navigation.NavigateTo(target);
+			}
+
+			return Task.CompletedTask;
+		}
+
+		string? ResolveParameter(string key)
+		{
+			if (action.Parameters is null)
+			{
+				return null;
+			}
+
+			return action.Parameters.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
+				? value
+				: null;
+		}
+
+		return action.Command switch
+		{
+			"leaderboard.submit" => HandleLeaderboardSubmitActionAsync(
+				ResolveParameter("alias"),
+				ResolveParameter("score")),
+			"leaderboard.sync" => RefreshLeaderboardAsync(),
+			"sessions.refresh" => RefreshSessionsAsync(),
+			"sessions.spawn" => HandleSessionSpawnActionAsync(ResolveParameter("sessionName")),
+			"accounts.universes.refresh" => HandleAccountsRefreshAsync(),
+			"accounts.universe.create" => HandleCreateUniverseActionAsync(ResolveParameter("name")),
+			"accounts.character.create" => HandleCreateCharacterActionAsync(ResolveParameter("name")),
+			_ => Task.CompletedTask
 		};
 	}
+
+	private async Task HandleAccountsRefreshAsync()
+	{
+		await RefreshUniverseDataAsync();
+		await RefreshWalletSnapshotAsync();
+		await RefreshModuleViewsAsync();
+	}
+
+	private async Task HandleCreateUniverseActionAsync(string? requestedName)
+	{
+		await CreateUniverseAsync(requestedName);
+		await RefreshModuleViewsAsync();
+	}
+
+	private async Task HandleCreateCharacterActionAsync(string? requestedName)
+	{
+		await CreateCharacterAsync(requestedName);
+		await RefreshModuleViewsAsync();
+	}
+
+	private Task HandleSessionSpawnActionAsync(string? requestedName = null)
+	{
+		return CreateSessionAsync(requestedName);
+	}
+
+	private Task HandleLeaderboardSubmitActionAsync(string? requestedAlias, string? requestedScore)
+	{
+		var alias = string.IsNullOrWhiteSpace(requestedAlias) ? _playerId : requestedAlias.Trim();
+		var score = 0d;
+		if (!string.IsNullOrWhiteSpace(requestedScore) &&
+		    double.TryParse(requestedScore, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+		{
+			score = parsed;
+		}
+
+		return SubmitScoreAsync(alias, score);
+	}
+
+	private async Task ActivateSkillAsync(string skillId)
+	{
+		if (string.Equals(_statistics.ActiveSkillId, skillId, StringComparison.OrdinalIgnoreCase))
+		{
+			return;
+		}
+
+		try
+		{
+			var snapshot = await StatisticsClient.ActivateSkillAsync(skillId);
+			_statistics = snapshot;
+			_lastSkillCurrencyTotal = snapshot.TotalSkillCurrency;
+			UpdateHeroAnimation();
+			if (_heroAnimation is not null)
+			{
+				await RenderLoop.PlayAnimationAsync(_heroAnimation);
+			}
+
+			await RefreshModuleViewsAsync();
+		}
+		catch (Exception ex)
+		{
+			await HandleErrorAsync(nameof(ActivateSkillAsync), ex, updateStatus: false);
+		}
+	}
+
+	private void UpdateHeroAnimation()
+	{
+		if (_spriteDefinition is null)
+		{
+			_heroAnimation = null;
+			return;
+		}
+
+		var activeEntry = GetActiveSkillEntry();
+		var animationName = activeEntry?.DefaultAnimation ?? "idle";
+		var accent = activeEntry?.AccentColor ?? DefaultSkillAccent;
+		_heroAnimation = SpriteAnimationMapper.CreateDescriptor(_spriteDefinition, animationName, accent);
+	}
+
+	private static string BuildUniverseChipClass(bool isActive) => isActive ? "account-chip active" : "account-chip";
+
+	private enum WalletTab
+	{
+		Account,
+		Universes,
+		Characters
+	}
+
+	private sealed class LoginFormModel
+	{
+		public string Email { get; set; } = string.Empty;
+		public string Password { get; set; } = string.Empty;
+	}
+
+	private sealed class SignupFormModel
+	{
+		public string DisplayName { get; set; } = string.Empty;
+		public string Email { get; set; } = string.Empty;
+		public string Password { get; set; } = string.Empty;
+	}
+
 }
