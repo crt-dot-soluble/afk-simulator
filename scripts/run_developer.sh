@@ -6,6 +6,7 @@ if [[ -z "${BASH_VERSION:-}" ]]; then
 fi
 
 NO_BROWSER="${NO_BROWSER:-0}"
+export DeveloperMode__AutoLogin=true
 SCRIPT_PATH="${BASH_SOURCE[0]}"
 SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_PATH}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -30,6 +31,7 @@ cleanup() {
     popd >/dev/null 2>&1 || true
     POPPED=1
   fi
+  unset DeveloperMode__AutoLogin || true
 }
 
 trap cleanup EXIT INT TERM

@@ -3,8 +3,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$repoRoot = (Get-Item (Join-Path $PSScriptRoot "..")).FullName
+$repoRoot = (Get-Item (Join-Path $PSScriptRoot ".." )).FullName
 $shouldOpenBrowser = -not $NoBrowser -and $env:NO_BROWSER -ne "1"
+$previousDeveloperMode = $env:DeveloperMode__AutoLogin
+$env:DeveloperMode__AutoLogin = "true"
 
 function Start-DotnetProcess {
     param(
@@ -103,5 +105,11 @@ try {
 finally {
     Stop-ProcessSafe $client
     Stop-ProcessSafe $server
+    if ($null -eq $previousDeveloperMode) {
+        Remove-Item Env:DeveloperMode__AutoLogin -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:DeveloperMode__AutoLogin = $previousDeveloperMode
+    }
     Pop-Location
 }
