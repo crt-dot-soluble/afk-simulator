@@ -25,6 +25,17 @@ Actions:
 - ACTION: Logged the change in the TODO ledger under the operational tooling entry for traceability.
 
 ---
+EntryId: MEM-20260118-02
+Timestamp: 2026-01-18T01:15:00Z
+Scope: Workflow;Pull Requests;Repository Hygiene
+Summary: Embedded a reusable PR template (title/description/verification/checklist) and mandated `.github/` parity inside SPECIFICATION.MD so tooling consistently surfaces the directives.
+Decisions:
+- DECISION: Every PR description must follow the code-block template in SPEC §10.11.
+- DECISION: The `.github/` folder is treated as mandatory infrastructure and must accompany any workflow/spec updates.
+Actions:
+- ACTION: Updated SPECIFICATION.MD §§10 & 16 plus TODO ledger to capture the template and `.github` directive for future agents.
+
+---
 EntryId: MEM-20260117-05
 Timestamp: 2026-01-17T23:50:00Z
 Scope: Module Views;Mission Control;Leaderboard/Sessions

@@ -57,6 +57,7 @@ Links:SPECIFICATION.MD#10|SPECIFICATION.MD#16|scripts/
 ChangeLog:
   - 2026-01-16T00:00:00Z: Added developer/end-user launch scripts, enforced commit/branch standards, and hardened CI plus coverage expectations
   - 2026-01-18T00:45:00Z: Clarified FEATURE branch workflow + testing guardrails in SPECIFICATION.MD so every commit executes Release tests, launcher verification, and CI-parity steps before push.
+  - 2026-01-18T01:15:00Z: Added the standardized PR description template and .github discipline directive to SPECIFICATION.MD §10/§16.
 Notes:Ensures one-command local runs, deterministic CI, and machine-friendly history formatting.
 ```
 

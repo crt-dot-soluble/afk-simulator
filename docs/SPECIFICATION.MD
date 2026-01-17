@@ -120,6 +120,27 @@ Notes:<short context>
 7. Create/update the PR once the branch contains at least one passing, pushed commit; continue iterating with the same loop until reviewers approve.
 ```
 10.10 `CI/CD Parity`: Treat the GitHub Actions matrix as part of the developer workflow. Any feature touching infrastructure, persistence, rendering, networking, or tooling must execute the equivalent local tasks (Release tests + launcher verification) before committing to reduce CI churn.
+10.11 `Pull Request Template` (copy/paste into every PR description to keep human + machine reviewers aligned):
+```
+Title: <type(scope): summary>
+
+Description:
+- <What changed>
+- <Why it changed>
+- <Docs/tests updated?>
+
+Verification:
+1. dotnet test -c Release
+2. runTests <subset>
+3. scripts/run.ps1 -NoBrowser (Mission Control)
+4. scripts/run_developer.ps1 -NoBrowser (/devtools)
+
+Checklist:
+- [ ] Spec/docs/TODO ledger updated
+- [ ] Memory ledger entry added
+- [ ] Branch pushed + CI green
+- [ ] Reviewers pinged
+```
 
 ## 11. AI-Augmented Development
 11.1 `Metadata`: Each module includes `MODULE.yaml` with exports, dependencies, telemetry keys for AI ingestion.
@@ -163,6 +184,7 @@ Notes:<short context>
 16.2 `End-User Flows`: The `scripts/run.(ps1|sh)` pair mirrors the production experience (Mission Control only) and shares the same cleanup semantics so QA and stakeholders can launch validated builds with one command.
 16.3 `Parity`: All four scripts must remain feature-parity across shells. Any future lifecycle changes (timeouts, env vars, telemetry hooks) land in both Bash and PowerShell variants simultaneously.
 16.4 `Database Profiles`: `appsettings*.json` expose `Database.*` (provider, connection string, Supabase overrides, data directory) plus `Caching.*` (Memory vs Redis). Scripts ensure the `App_Data` folder exists for SQLite, while Supabase deployments supply the hosted Postgres URL/API key via secrets.
+16.5 `.github Discipline`: The `.github/` folder (PR templates, Copilot instructions, workflows) is a first-class artifact—always commit/push it alongside SPEC changes so every tool (especially VS Code + Copilot) begins by reading docs/SPECIFICATION.MD and prerequisite guidance.
 
 ## 17. Session Workflow
 17.1 `Start-of-Session Ritual` (execute in this order before making changes):
