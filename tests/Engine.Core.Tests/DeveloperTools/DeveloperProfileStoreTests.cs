@@ -6,7 +6,7 @@ using Engine.Core.DeveloperTools;
 
 namespace Engine.Core.Tests.DeveloperTools;
 
-public sealed class DeveloperProfileStoreTests
+internal sealed class DeveloperProfileStoreTests
 {
     [Fact]
     public void PersistsProfilesToDisk()

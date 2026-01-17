@@ -1,6 +1,61 @@
 # Memory Ledger
 
 ---
+EntryId: MEM-20260117-06
+Timestamp: 2026-01-18T00:30:00Z
+Scope: Persistence;Mission Control;Launcher
+Summary: Serialized the module-state persistence pipeline with a write gate so the Mission Control launcher no longer crashes with SQLite "database is locked" errors during the tick loop.
+Decisions:
+- DECISION: DatabaseModuleStateStore must serialize writes/deletes through a shared semaphore to keep SQLite happy until we swap to Supabase/Postgres.
+- DECISION: Launcher verification remains part of the workflow whenever persistence changes touch Mission Control.
+Actions:
+- ACTION: Wrapped DatabaseModuleStateStore.SaveAsync/DeleteAsync in a semaphore, implemented IAsyncDisposable, reran tests, and confirmed `scripts/run.ps1 -NoBrowser` stays alive without lock faults.
+- ACTION: Updated the wiki/database notes to call out the serialized ModuleStateStore writes and logged this entry for future agents.
+
+---
+EntryId: MEM-20260118-01
+Timestamp: 2026-01-18T00:45:00Z
+Scope: Workflow;Version Control;Testing
+Summary: Strengthened SPECIFICATION.MD with machine-readable branching, commit, and testing directives so every agent follows the same branch lifecycle and CI parity checks.
+Decisions:
+- DECISION: Every feature branch must run Release tests, targeted suites, launchers, and CI parity tasks before staging/committing/pushing.
+- DECISION: Branch creation, refinement, testing, and pushing now follow a seven-step lifecycle baked into §10.9, with guardrails reiterated in §17.
+Actions:
+- ACTION: Updated SPECIFICATION.MD §§10 & 17 to codify the branch/test workflow and added CI/CD parity expectations.
+- ACTION: Logged the change in the TODO ledger under the operational tooling entry for traceability.
+
+---
+EntryId: MEM-20260118-02
+Timestamp: 2026-01-18T01:15:00Z
+Scope: Workflow;Pull Requests;Repository Hygiene
+Summary: Embedded a reusable PR template (title/description/verification/checklist) and mandated `.github/` parity inside SPECIFICATION.MD so tooling consistently surfaces the directives.
+Decisions:
+- DECISION: Every PR description must follow the code-block template in SPEC §10.11.
+- DECISION: The `.github/` folder is treated as mandatory infrastructure and must accompany any workflow/spec updates.
+Actions:
+- ACTION: Updated SPECIFICATION.MD §§10 & 16 plus TODO ledger to capture the template and `.github` directive for future agents.
+
+---
+EntryId: MEM-20260118-03
+Timestamp: 2026-01-18T01:25:00Z
+Scope: Workflow;Pull Requests
+Summary: Added SPEC §10.12 requiring every PR handoff to include the GitHub compare URL so reviewers can open the diff immediately.
+Decisions:
+- DECISION: Whenever someone is asked to open a PR, they must cite the exact compare link `https://github.com/crt-dot-soluble/afk-simulator/compare/main...feature/<todo-id>-<slug>`.
+Actions:
+- ACTION: Updated SPECIFICATION.MD, TODO ledger, and this memory log to capture the compare-link directive for future agents.
+
+---
+EntryId: MEM-20260118-04
+Timestamp: 2026-01-18T01:40:00Z
+Scope: Workflow;Commits
+Summary: Introduced a standardized commit message template (subject + TODO block + refs) in SPEC §10.13 so every change carries machine-readable context.
+Decisions:
+- DECISION: All commits must copy/paste the template to guarantee TODO linkage and consistent metadata.
+Actions:
+- ACTION: Updated SPEC/TODO ledger to capture the template requirement for future agents.
+
+---
 EntryId: MEM-20260117-05
 Timestamp: 2026-01-17T23:50:00Z
 Scope: Module Views;Mission Control;Leaderboard/Sessions

@@ -1,0 +1,265 @@
+@page "/settings"
+@inject GraphicsSettingsClient GraphicsClient
+@inject ClientErrorReporter ErrorReporter
+
+<PageTitle>Systems Settings</PageTitle>
+
+<section class="settings-hero" aria-label="Settings overview">
+    <div>
+        <p>Mission Control Settings</p>
+        <h1>Dial in how the idle engine feels</h1>
+        <small>Graphics, audio, and experimental toggles now live here for quick iteration.</small>
+    </div>
+    <span class="settings-chip">Live Preview Ready</span>
+</section>
+
+@if (!string.IsNullOrWhiteSpace(_errorMessage))
+{
+    <p class="settings-error">@_errorMessage</p>
+}
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <p class="settings-status">@_statusMessage</p>
+}
+
+<div class="settings-grid">
+    <article class="settings-card">
+        <header>
+            <div>
+                <strong>Graphics Pipeline</strong>
+                <small>GPU cadence, density, smoothing, and tier</small>
+            </div>
+        </header>
+        <EditForm Model="_graphicsDraft" OnValidSubmit="ApplyGraphicsAsync">
+            <div class="settings-field">
+                <label>Target FPS</label>
+                <InputNumber @bind-Value="_graphicsDraft.TargetFps" min="30" max="240" />
+            </div>
+            <div class="settings-field">
+                <label>Resolution Scale</label>
+                <InputNumber @bind-Value="_graphicsDraft.ResolutionScale" step="0.1" min="0.25" max="2.5" />
+            </div>
+            <div class="settings-field">
+                <label>Particle Density</label>
+                <InputNumber @bind-Value="_graphicsDraft.ParticleDensity" min="0" max="100" />
+            </div>
+            <div class="settings-field toggle">
+                <label>Sprite Smoothing</label>
+                <InputCheckbox @bind-Value="_graphicsDraft.SpriteSmoothing" />
+            </div>
+            <div class="settings-field">
+                <label>GPU Tier</label>
+                <InputSelect @bind-Value="_graphicsDraft.GpuTier">
+                    <option value="tier1">Tier 1 · Low power</option>
+                    <option value="tier2">Tier 2 · Balanced</option>
+                    <option value="tier3">Tier 3 · Performance</option>
+                </InputSelect>
+            </div>
+            <div class="settings-actions">
+                <button type="submit" disabled="@_graphicsBusy">Apply</button>
+                <button type="button" class="ghost" @onclick="ResetGraphics" disabled="@_graphicsBusy">Reset</button>
+            </div>
+        </EditForm>
+    </article>
+
+    <article class="settings-card">
+        <header>
+            <div>
+                <strong>Audio Mix</strong>
+                <small>Route layered ambience, music, and SFX</small>
+            </div>
+        </header>
+        <EditForm Model="_audioDraft" OnValidSubmit="SaveAudioAsync">
+            <div class="settings-field slider">
+                <label>Master Volume</label>
+                <div>
+                    <input type="range" min="0" max="100" @bind="_audioDraft.MasterVolume" />
+                    <span>@_audioDraft.MasterVolume%</span>
+                </div>
+            </div>
+            <div class="settings-field slider">
+                <label>Music Volume</label>
+                <div>
+                    <input type="range" min="0" max="100" @bind="_audioDraft.MusicVolume" />
+                    <span>@_audioDraft.MusicVolume%</span>
+                </div>
+            </div>
+            <div class="settings-field slider">
+                <label>SFX Volume</label>
+                <div>
+                    <input type="range" min="0" max="100" @bind="_audioDraft.SfxVolume" />
+                    <span>@_audioDraft.SfxVolume%</span>
+                </div>
+            </div>
+            <div class="settings-field toggle">
+                <label>Mute All Output</label>
+                <InputCheckbox @bind-Value="_audioDraft.MuteAll" />
+            </div>
+            <div class="settings-field toggle">
+                <label>Spatial Simulation</label>
+                <InputCheckbox @bind-Value="_audioDraft.Spatialization" />
+            </div>
+            <div class="settings-actions">
+                <button type="submit" disabled="@_audioBusy">Save audio profile</button>
+            </div>
+        </EditForm>
+    </article>
+
+    <article class="settings-card">
+        <header>
+            <div>
+                <strong>Other Controls</strong>
+                <small>Interface polish and experimental hooks</small>
+            </div>
+        </header>
+        <EditForm Model="_otherDraft" OnValidSubmit="SaveOtherAsync">
+            <div class="settings-field toggle">
+                <label>Show in-world tooltips</label>
+                <InputCheckbox @bind-Value="_otherDraft.ShowTooltips" />
+            </div>
+            <div class="settings-field toggle">
+                <label>Enable experimental UI chrome</label>
+                <InputCheckbox @bind-Value="_otherDraft.EnableExperimentalUi" />
+            </div>
+            <div class="settings-field toggle">
+                <label>Display debug metrics overlay</label>
+                <InputCheckbox @bind-Value="_otherDraft.DebugOverlay" />
+            </div>
+            <div class="settings-actions">
+                <button type="submit" disabled="@_otherBusy">Save interface settings</button>
+            </div>
+        </EditForm>
+    </article>
+</div>
+
+@code {
+    private RenderSettingsDraft _graphicsDraft = RenderSettingsDraft.From(RenderSettings.Balanced);
+    private AudioSettingsDraft _audioDraft = new();
+    private OtherSettingsDraft _otherDraft = new();
+    private bool _graphicsBusy;
+    private bool _audioBusy;
+    private bool _otherBusy;
+    private string? _statusMessage;
+    private string? _errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadGraphicsAsync();
+    }
+
+    private async Task LoadGraphicsAsync()
+    {
+        try
+        {
+            var settings = await GraphicsClient.GetAsync();
+            _graphicsDraft = RenderSettingsDraft.From(settings);
+            _errorMessage = null;
+        }
+        catch (Exception ex)
+        {
+            await HandleErrorAsync(nameof(LoadGraphicsAsync), ex);
+        }
+    }
+
+    private async Task ApplyGraphicsAsync()
+    {
+        if (_graphicsBusy)
+        {
+            return;
+        }
+
+        _graphicsBusy = true;
+        try
+        {
+            var updated = await GraphicsClient.UpdateAsync(_graphicsDraft.ToRenderSettings());
+            _graphicsDraft = RenderSettingsDraft.From(updated);
+            _statusMessage = "Graphics profile applied.";
+            _errorMessage = null;
+        }
+        catch (Exception ex)
+        {
+            await HandleErrorAsync(nameof(ApplyGraphicsAsync), ex);
+        }
+        finally
+        {
+            _graphicsBusy = false;
+        }
+    }
+
+    private void ResetGraphics()
+    {
+        _graphicsDraft = RenderSettingsDraft.From(RenderSettings.Balanced);
+        _statusMessage = "Graphics reset to balanced.";
+        _errorMessage = null;
+    }
+
+    private Task SaveAudioAsync()
+    {
+        if (_audioBusy)
+        {
+            return Task.CompletedTask;
+        }
+
+        _audioBusy = true;
+        _statusMessage = "Audio profile saved (client-side placeholder).";
+        _errorMessage = null;
+        _audioBusy = false;
+        return Task.CompletedTask;
+    }
+
+    private Task SaveOtherAsync()
+    {
+        if (_otherBusy)
+        {
+            return Task.CompletedTask;
+        }
+
+        _otherBusy = true;
+        _statusMessage = "Interface preferences updated.";
+        _errorMessage = null;
+        _otherBusy = false;
+        return Task.CompletedTask;
+    }
+
+    private async Task HandleErrorAsync(string operation, Exception exception)
+    {
+        await ErrorReporter.ReportAsync(operation, exception);
+        _errorMessage = $"{operation} failed: {exception.Message}";
+    }
+
+    private sealed class RenderSettingsDraft
+    {
+        public int TargetFps { get; set; }
+        public double ResolutionScale { get; set; }
+        public int ParticleDensity { get; set; }
+        public bool SpriteSmoothing { get; set; }
+        public string GpuTier { get; set; } = "tier2";
+
+        public RenderSettings ToRenderSettings() => new(TargetFps, ResolutionScale, SpriteSmoothing, ParticleDensity, GpuTier);
+
+        public static RenderSettingsDraft From(RenderSettings settings) => new()
+        {
+            TargetFps = settings.TargetFps,
+            ResolutionScale = settings.ResolutionScale,
+            ParticleDensity = settings.ParticleDensity,
+            SpriteSmoothing = settings.SpriteSmoothing,
+            GpuTier = settings.GpuTier
+        };
+    }
+
+    private sealed class AudioSettingsDraft
+    {
+        public int MasterVolume { get; set; } = 80;
+        public int MusicVolume { get; set; } = 65;
+        public int SfxVolume { get; set; } = 70;
+        public bool MuteAll { get; set; }
+        public bool Spatialization { get; set; } = true;
+    }
+
+    private sealed class OtherSettingsDraft
+    {
+        public bool ShowTooltips { get; set; } = true;
+        public bool EnableExperimentalUi { get; set; }
+        public bool DebugOverlay { get; set; }
+    }
+}

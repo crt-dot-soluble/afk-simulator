@@ -1,0 +1,620 @@
+@using System.Collections.Generic
+@using Engine.Core.Contracts
+
+@if (Document is null)
+{
+    <div class="module-view-empty">Module view unavailable.</div>
+}
+else
+{
+    <div class="module-view-root">
+        @foreach (var block in Document.Blocks)
+        {
+            @RenderBlock(block)
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public ModuleViewDocument Document { get; set; } = default!;
+    [Parameter] public EventCallback<ModuleViewSelection> OnSelection { get; set; }
+    [Parameter] public EventCallback<ModuleViewActionRequest> OnAction { get; set; }
+
+    private readonly Dictionary<string, Dictionary<string, string?>> _formValues =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private string? _activeDocumentId;
+
+    protected override void OnParametersSet()
+    {
+        if (Document?.Descriptor?.Id is null)
+        {
+            _activeDocumentId = null;
+            _formValues.Clear();
+            return;
+        }
+
+        if (!string.Equals(_activeDocumentId, Document.Descriptor.Id, StringComparison.Ordinal))
+        {
+            _activeDocumentId = Document.Descriptor.Id;
+            _formValues.Clear();
+        }
+
+        EnsureFormDefaults(Document.Blocks);
+    }
+
+    private RenderFragment RenderBlock(ModuleViewBlock block) => block switch
+    {
+        ModuleViewSectionBlock section => RenderSection(section),
+        ModuleViewStackBlock stack => RenderStack(stack),
+        ModuleViewGridBlock grid => RenderGrid(grid),
+        ModuleViewMetricBlock metric => RenderMetric(metric),
+        ModuleViewListBlock list => RenderList(list),
+        ModuleViewActionBarBlock actionBar => RenderActionBar(actionBar),
+        ModuleViewFormBlock form => RenderForm(form),
+        ModuleViewSpriteBlock sprite => RenderSprite(sprite),
+        ModuleViewEquipmentBlock equipment => RenderEquipment(equipment),
+        ModuleViewTimelineBlock timeline => RenderTimeline(timeline),
+        _ => RenderUnsupported(block)
+    };
+
+    private RenderFragment RenderSection(ModuleViewSectionBlock section) => builder =>
+    {
+        builder.OpenElement(0, "section");
+        builder.AddAttribute(1, "class", "module-view-section");
+        if (!string.IsNullOrWhiteSpace(section.Style?.Accent))
+        {
+            builder.AddAttribute(2, "style", $"--module-view-accent: {section.Style.Accent};");
+        }
+
+        builder.OpenElement(3, "header");
+        builder.AddContent(4, section.Title);
+        if (!string.IsNullOrWhiteSpace(section.Description))
+        {
+            builder.OpenElement(5, "small");
+            builder.AddContent(6, section.Description);
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+
+        builder.OpenElement(7, "div");
+        builder.AddAttribute(8, "class", "module-view-section__body");
+        foreach (var child in section.Children)
+        {
+            builder.AddContent(9, RenderBlock(child));
+        }
+
+        builder.CloseElement();
+        builder.CloseElement();
+    };
+
+    private RenderFragment RenderStack(ModuleViewStackBlock stack) => builder =>
+    {
+        builder.OpenElement(0, "div");
+        var orientationClass = stack.Orientation == ModuleViewOrientation.Horizontal
+            ? "module-view-stack module-view-stack--horizontal"
+            : "module-view-stack";
+        builder.AddAttribute(1, "class", orientationClass);
+        foreach (var child in stack.Children)
+        {
+            builder.AddContent(2, RenderBlock(child));
+        }
+
+        builder.CloseElement();
+    };
+
+    private RenderFragment RenderGrid(ModuleViewGridBlock grid) => builder =>
+    {
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "module-view-grid");
+        var columns = Math.Max(1, grid.Columns);
+        var styles = new List<string>
+        {
+            $"grid-template-columns: repeat({columns}, minmax(0, 1fr));"
+        };
+
+        var style = grid.Style;
+        if (style is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(style.Accent))
+            {
+                styles.Add($"--module-view-accent: {style.Accent};");
+            }
+
+            if (!string.IsNullOrWhiteSpace(style.Background))
+            {
+                styles.Add($"--module-view-background: {style.Background};");
+            }
+        }
+
+        if (styles.Count > 0)
+        {
+            builder.AddAttribute(2, "style", string.Join(' ', styles));
+        }
+
+        foreach (var cell in grid.Cells)
+        {
+            builder.OpenElement(3, "div");
+            builder.AddAttribute(4, "class", "module-view-grid__cell");
+            var span = Math.Clamp(cell.ColumnSpan <= 0 ? 1 : cell.ColumnSpan, 1, columns);
+            builder.AddAttribute(5, "style", $"grid-column: span {span};");
+            foreach (var child in cell.Children)
+            {
+                builder.AddContent(6, RenderBlock(child));
+            }
+
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+    };
+
+    private RenderFragment RenderMetric(ModuleViewMetricBlock metric) => builder =>
+    {
+        builder.OpenElement(0, "article");
+        builder.AddAttribute(1, "class", "module-view-metric");
+        if (!string.IsNullOrWhiteSpace(metric.Accent))
+        {
+            builder.AddAttribute(2, "style", $"--module-view-accent: {metric.Accent};");
+        }
+
+        builder.OpenElement(3, "div");
+        builder.AddAttribute(4, "class", "module-view-metric__body");
+        if (!string.IsNullOrWhiteSpace(metric.Label))
+        {
+            builder.OpenElement(5, "span");
+            builder.AddContent(6, metric.Label);
+            builder.CloseElement();
+        }
+
+        builder.OpenElement(7, "strong");
+        builder.AddContent(8, metric.Value);
+        builder.CloseElement();
+
+        if (!string.IsNullOrWhiteSpace(metric.Secondary))
+        {
+            builder.OpenElement(9, "small");
+            builder.AddContent(10, metric.Secondary);
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+
+        if (!string.IsNullOrWhiteSpace(metric.Trend))
+        {
+            builder.OpenElement(11, "footer");
+            builder.AddContent(12, string.IsNullOrWhiteSpace(metric.TrendLabel)
+                ? metric.Trend
+                : $"{metric.Trend} {metric.TrendLabel}");
+            builder.CloseElement();
+        }
+
+        if (metric.Tags is not null && metric.Tags.Count > 0)
+        {
+            builder.OpenElement(13, "ul");
+            builder.AddAttribute(14, "class", "module-view-metric__tags");
+            foreach (var tag in metric.Tags)
+            {
+                builder.OpenElement(15, "li");
+                builder.AddContent(16, $"{tag.Key}: {tag.Value}");
+                builder.CloseElement();
+            }
+
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+    };
+
+    private RenderFragment RenderList(ModuleViewListBlock list) => builder =>
+    {
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", list.AllowSelection ? "module-view-list selectable" : "module-view-list");
+
+        builder.OpenElement(2, "header");
+        builder.AddContent(3, list.Title);
+        builder.CloseElement();
+
+        builder.OpenElement(4, "ul");
+        foreach (var (item, index) in list.Items.Select((value, index) => (value, index)))
+        {
+            builder.OpenElement(5, "li");
+            var classes = item.IsActive ? "module-view-list__item active" : "module-view-list__item";
+            builder.AddAttribute(6, "class", classes);
+
+            builder.OpenElement(7, "div");
+            builder.AddAttribute(8, "class", "module-view-list__content");
+
+            builder.OpenElement(9, "div");
+            builder.AddAttribute(10, "class", "module-view-list__meta");
+            if (list.ShowOrder)
+            {
+                builder.OpenElement(11, "em");
+                builder.AddContent(12, (index + 1).ToString());
+                builder.CloseElement();
+            }
+
+            builder.OpenElement(13, "strong");
+            builder.AddContent(14, item.Label);
+            builder.CloseElement();
+
+            if (!string.IsNullOrWhiteSpace(item.Description))
+            {
+                builder.OpenElement(15, "small");
+                builder.AddContent(16, item.Description);
+                builder.CloseElement();
+            }
+
+            builder.CloseElement();
+
+            builder.OpenElement(17, "div");
+            builder.AddAttribute(18, "class", "module-view-list__values");
+            if (!string.IsNullOrWhiteSpace(item.Value))
+            {
+                builder.OpenElement(19, "span");
+                builder.AddContent(20, item.Value);
+                builder.CloseElement();
+            }
+
+            if (item.Badges is not null)
+            {
+                foreach (var badge in item.Badges)
+                {
+                    builder.OpenElement(21, "span");
+                    builder.AddAttribute(22, "class", "module-view-list__badge");
+                    builder.AddContent(23, $"{badge.Key}: {badge.Value}");
+                    builder.CloseElement();
+                }
+            }
+
+            builder.CloseElement();
+
+            builder.CloseElement();
+
+            if (list.AllowSelection)
+            {
+                builder.OpenElement(24, "button");
+                builder.AddAttribute(25, "type", "button");
+                builder.AddAttribute(26, "class", "module-view-list__action");
+                if (item.IsActive)
+                {
+                    builder.AddAttribute(27, "disabled", true);
+                }
+
+                builder.AddAttribute(28, "onclick", EventCallback.Factory.Create(this,
+                    () => HandleListSelectionAsync(list, item)));
+                builder.AddContent(29, item.IsActive ? "Active" : "Activate");
+                builder.CloseElement();
+            }
+
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+        builder.CloseElement();
+    };
+
+    private RenderFragment RenderActionBar(ModuleViewActionBarBlock actionBar) => builder =>
+    {
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "module-view-action-bar");
+        foreach (var action in actionBar.Actions)
+        {
+            builder.OpenElement(2, "button");
+            builder.AddAttribute(3, "type", "button");
+            builder.AddAttribute(4, "class",
+                action.IsPrimary ? "module-view-action primary" : "module-view-action");
+            builder.AddAttribute(5, "onclick", EventCallback.Factory.Create(this, () => HandleActionAsync(action)));
+            builder.AddContent(6, action.Label);
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+    };
+
+    private RenderFragment RenderForm(ModuleViewFormBlock form) => builder =>
+    {
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "module-view-form");
+        if (!string.IsNullOrWhiteSpace(form.Style?.Accent))
+        {
+            builder.AddAttribute(2, "style", $"--module-view-accent: {form.Style.Accent};");
+        }
+
+        builder.OpenElement(3, "header");
+        builder.AddContent(4, form.Title);
+        if (!string.IsNullOrWhiteSpace(form.Description))
+        {
+            builder.OpenElement(5, "small");
+            builder.AddContent(6, form.Description);
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+
+        builder.OpenElement(7, "div");
+        builder.AddAttribute(8, "class", "module-view-form__body");
+        foreach (var field in form.Fields)
+        {
+            builder.AddContent(9, RenderFormField(form, field));
+        }
+
+        builder.CloseElement();
+
+        if (form.Actions.Count > 0)
+        {
+            builder.OpenElement(10, "div");
+            builder.AddAttribute(11, "class", "module-view-form__actions");
+            foreach (var action in form.Actions)
+            {
+                builder.OpenElement(12, "button");
+                builder.AddAttribute(13, "type", "button");
+                builder.AddAttribute(14, "class",
+                    action.IsPrimary ? "module-view-action primary" : "module-view-action");
+                builder.AddAttribute(15, "onclick",
+                    EventCallback.Factory.Create(this, () => HandleFormActionAsync(form, action)));
+                builder.AddContent(16, action.Label);
+                builder.CloseElement();
+            }
+
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+    };
+
+    private RenderFragment RenderFormField(ModuleViewFormBlock form, ModuleViewFormField field) => builder =>
+    {
+        builder.OpenElement(0, "label");
+        builder.AddAttribute(1, "class", "module-view-field");
+        builder.OpenElement(2, "span");
+        builder.AddContent(3, field.Label);
+        builder.CloseElement();
+
+        if (!string.IsNullOrWhiteSpace(field.Description))
+        {
+            builder.OpenElement(4, "small");
+            builder.AddContent(5, field.Description);
+            builder.CloseElement();
+        }
+
+        var value = ReadFormValue(form.Id, field.Id);
+        var inputType = NormalizeFieldType(field.Type);
+        if (string.Equals(inputType, "select", StringComparison.OrdinalIgnoreCase) && field.Options is not null)
+        {
+            builder.OpenElement(6, "select");
+            builder.AddAttribute(7, "value", value);
+            builder.AddAttribute(8, "onchange",
+                EventCallback.Factory.Create<ChangeEventArgs>(this,
+                    args => HandleFieldChanged(form.Id, field.Id, args)));
+            foreach (var option in field.Options)
+            {
+                builder.OpenElement(9, "option");
+                builder.AddAttribute(10, "value", option.Value);
+                if (string.Equals(option.Value, value, StringComparison.OrdinalIgnoreCase))
+                {
+                    builder.AddAttribute(11, "selected", true);
+                }
+
+                builder.AddContent(12, option.Label);
+                builder.CloseElement();
+            }
+
+            builder.CloseElement();
+        }
+        else
+        {
+            builder.OpenElement(13, "input");
+            builder.AddAttribute(14, "type", inputType);
+            builder.AddAttribute(15, "value", value);
+            builder.AddAttribute(16, "oninput",
+                EventCallback.Factory.Create<ChangeEventArgs>(this,
+                    args => HandleFieldChanged(form.Id, field.Id, args)));
+            if (!string.IsNullOrWhiteSpace(field.Placeholder))
+            {
+                builder.AddAttribute(17, "placeholder", field.Placeholder);
+            }
+
+            if (field.Required)
+            {
+                builder.AddAttribute(18, "required", true);
+            }
+
+            if (field.MaxLength.HasValue)
+            {
+                builder.AddAttribute(19, "maxlength", field.MaxLength.Value);
+            }
+
+            if (field.Min.HasValue)
+            {
+                builder.AddAttribute(20, "min", field.Min.Value);
+            }
+
+            if (field.Max.HasValue)
+            {
+                builder.AddAttribute(21, "max", field.Max.Value);
+            }
+
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+    };
+
+    private RenderFragment RenderSprite(ModuleViewSpriteBlock sprite) => builder =>
+    {
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "module-view-sprite");
+        builder.AddContent(2, $"Sprite: {sprite.SpriteId} ({sprite.Animation})");
+        builder.CloseElement();
+    };
+
+    private RenderFragment RenderEquipment(ModuleViewEquipmentBlock equipment) => builder =>
+    {
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "module-view-equipment");
+        if (!string.IsNullOrWhiteSpace(equipment.Title))
+        {
+            builder.OpenElement(2, "header");
+            builder.AddContent(3, equipment.Title);
+            builder.CloseElement();
+        }
+
+        builder.OpenElement(4, "ul");
+        foreach (var slot in equipment.Slots)
+        {
+            builder.OpenElement(5, "li");
+            builder.AddContent(6, $"{slot.Slot}: {slot.ItemName ?? "—"}");
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+        builder.CloseElement();
+    };
+
+    private RenderFragment RenderTimeline(ModuleViewTimelineBlock timeline) => builder =>
+    {
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "module-view-timeline");
+        if (!string.IsNullOrWhiteSpace(timeline.Title))
+        {
+            builder.OpenElement(2, "header");
+            builder.AddContent(3, timeline.Title);
+            builder.CloseElement();
+        }
+
+        builder.OpenElement(4, "ul");
+        foreach (var entry in timeline.Events)
+        {
+            builder.OpenElement(5, "li");
+            builder.AddContent(6, $"{entry.Timestamp:HH:mm:ss} · {entry.Label} · {entry.Value}");
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+        builder.CloseElement();
+    };
+
+    private RenderFragment RenderUnsupported(ModuleViewBlock block) => builder =>
+    {
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "module-view-unsupported");
+        builder.AddContent(2, $"Unsupported block kind '{block.BlockKind}'.");
+        builder.CloseElement();
+    };
+
+    private Task HandleListSelectionAsync(ModuleViewListBlock list, ModuleViewListItem item)
+    {
+        if (!OnSelection.HasDelegate)
+        {
+            return Task.CompletedTask;
+        }
+
+        var payload = new ModuleViewSelection(Document.Descriptor.Id, list.Id, item.Id);
+        return OnSelection.InvokeAsync(payload);
+    }
+
+    private void EnsureFormDefaults(IEnumerable<ModuleViewBlock>? blocks)
+    {
+        if (blocks is null)
+        {
+            return;
+        }
+
+        foreach (var block in blocks)
+        {
+            switch (block)
+            {
+                case ModuleViewFormBlock form:
+                    if (!_formValues.TryGetValue(form.Id, out var fieldValues))
+                    {
+                        fieldValues = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+                        _formValues[form.Id] = fieldValues;
+                    }
+
+                    foreach (var field in form.Fields)
+                    {
+                        if (!fieldValues.ContainsKey(field.Id))
+                        {
+                            fieldValues[field.Id] = field.Value ?? string.Empty;
+                        }
+                    }
+
+                    break;
+                case ModuleViewSectionBlock section:
+                    EnsureFormDefaults(section.Children);
+                    break;
+                case ModuleViewStackBlock stack:
+                    EnsureFormDefaults(stack.Children);
+                    break;
+                case ModuleViewGridBlock grid:
+                    foreach (var cell in grid.Cells)
+                    {
+                        EnsureFormDefaults(cell.Children);
+                    }
+
+                    break;
+            }
+        }
+    }
+
+    private string ReadFormValue(string formId, string fieldId)
+    {
+        if (_formValues.TryGetValue(formId, out var fields) &&
+            fields.TryGetValue(fieldId, out var value) &&
+            value is not null)
+        {
+            return value;
+        }
+
+        return string.Empty;
+    }
+
+    private void HandleFieldChanged(string formId, string fieldId, ChangeEventArgs args)
+    {
+        if (!_formValues.TryGetValue(formId, out var fields))
+        {
+            fields = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            _formValues[formId] = fields;
+        }
+
+        fields[fieldId] = args.Value?.ToString() ?? string.Empty;
+    }
+
+    private Task HandleFormActionAsync(ModuleViewFormBlock form, ModuleViewActionDescriptor action)
+    {
+        if (!_formValues.TryGetValue(form.Id, out var values))
+        {
+            values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var payload = new Dictionary<string, string?>(values, StringComparer.OrdinalIgnoreCase);
+        return HandleActionAsync(action, payload);
+    }
+
+    private static string NormalizeFieldType(string? type)
+    {
+        return type?.ToLowerInvariant() switch
+        {
+            "email" => "email",
+            "password" => "password",
+            "number" => "number",
+            "select" => "select",
+            _ => "text"
+        };
+    }
+
+    private Task HandleActionAsync(ModuleViewActionDescriptor action,
+        IReadOnlyDictionary<string, string?>? parameters = null)
+    {
+        if (!OnAction.HasDelegate)
+        {
+            return Task.CompletedTask;
+        }
+
+        var payload = new ModuleViewActionRequest(Document.Descriptor.Id, action.Id, action.Command, parameters);
+        return OnAction.InvokeAsync(payload);
+    }
+
+}

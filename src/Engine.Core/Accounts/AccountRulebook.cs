@@ -9,11 +9,11 @@ public sealed class AccountRulebook
 
     public AccountRulebookSnapshot Snapshot => Volatile.Read(ref _snapshot)!;
 
-    public void SetMaxAccounts(int value) => Update(static (snapshot, next) =>
-        snapshot with { MaxAccountsPerUser = Clamp(next) }, value);
+    public void SetMaxUniversesPerUser(int value) => Update(static (snapshot, next) =>
+        snapshot with { MaxUniversesPerUser = Clamp(next) }, value);
 
-    public void SetMaxProfiles(int value) => Update(static (snapshot, next) =>
-        snapshot with { MaxProfilesPerAccount = Clamp(next) }, value);
+    public void SetMaxCharactersPerUniverse(int value) => Update(static (snapshot, next) =>
+        snapshot with { MaxCharactersPerUniverse = Clamp(next) }, value);
 
     public void SetDefaultBaseCurrency(long value) => Update(static (snapshot, next) =>
         snapshot with { DefaultBaseCurrency = ClampCurrency(next, 0, 10_000_000_000) }, value);
@@ -23,9 +23,9 @@ public sealed class AccountRulebook
 
     public void SetDefaultSprite(string spriteId) => Update(static (snapshot, next) =>
             snapshot with
-                {
-                    DefaultSpriteAssetId = string.IsNullOrWhiteSpace(next) ? snapshot.DefaultSpriteAssetId : next
-                },
+            {
+                DefaultSpriteAssetId = string.IsNullOrWhiteSpace(next) ? snapshot.DefaultSpriteAssetId : next
+            },
         spriteId);
 
     public void SetStarterEquipment(EquipmentSlots slots)
@@ -55,8 +55,8 @@ public sealed class AccountRulebook
 }
 
 public sealed record AccountRulebookSnapshot(
-    int MaxAccountsPerUser,
-    int MaxProfilesPerAccount,
+    int MaxUniversesPerUser,
+    int MaxCharactersPerUniverse,
     long DefaultBaseCurrency,
     long DefaultPremiumCurrency,
     EquipmentSlots StarterEquipment,

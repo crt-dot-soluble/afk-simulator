@@ -1,19 +1,90 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using Engine.Core;
 using Engine.Core.Accounts;
 using Engine.Core.Contracts;
 using Engine.Core.DeveloperTools;
 using Engine.Core.Multiplayer;
+using Engine.Core.Presentation;
 using Engine.Core.Rendering;
+using Engine.Core.Rendering.Sprites;
+using Engine.Core.Statistics;
+using Engine.Server.Accounts;
+using Engine.Server.Developer;
 using Engine.Server.Hubs;
 using Engine.Server.Logging;
 using Engine.Server.Models;
+using Engine.Server.Models.Sprites;
+using Engine.Server.Models.Statistics;
+using Engine.Server.Options;
+using Engine.Server.Persistence;
 using Engine.Server.Security;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.StackExchangeRedis;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddIncrementalEngine();
+builder.Services.Configure<DatabaseOptions>(builder.Configuration.GetSection("Database"));
+builder.Services.AddDbContextFactory<IncrementalEngineDbContext>((serviceProvider, optionsBuilder) =>
+{
+    var options = serviceProvider.GetRequiredService<IOptions<DatabaseOptions>>().Value;
+    var environment = serviceProvider.GetRequiredService<IHostEnvironment>();
+    switch (options.Provider)
+    {
+        case DatabaseProvider.PostgreSql:
+            if (string.IsNullOrWhiteSpace(options.ConnectionString))
+            {
+                throw new InvalidOperationException(
+                    "Database:ConnectionString is required when using the PostgreSql provider.");
+            }
+
+            optionsBuilder.UseNpgsql(options.ConnectionString, sql => sql.EnableRetryOnFailure());
+            break;
+        case DatabaseProvider.Supabase:
+            var supabaseConnection = options.Supabase?.ConnectionString;
+            if (string.IsNullOrWhiteSpace(supabaseConnection))
+            {
+                supabaseConnection = options.ConnectionString;
+            }
+
+            if (string.IsNullOrWhiteSpace(supabaseConnection))
+            {
+                throw new InvalidOperationException(
+                    "Database:Supabase:ConnectionString (or Database:ConnectionString) is required when using the Supabase provider.");
+            }
+
+            optionsBuilder.UseNpgsql(supabaseConnection, sql => sql.EnableRetryOnFailure());
+            break;
+        default:
+            var dataDirectory = string.IsNullOrWhiteSpace(options.DataDirectory)
+                ? Path.Combine(environment.ContentRootPath, "App_Data")
+                : options.DataDirectory!;
+            Directory.CreateDirectory(dataDirectory);
+            var dbPath = Path.Combine(dataDirectory, options.DatabaseName);
+            optionsBuilder.UseSqlite($"Data Source={dbPath}");
+            break;
+    }
+});
+builder.Services.AddHostedService<DatabaseInitializerHostedService>();
+builder.Services.AddSingleton<IModuleStateStore, DatabaseModuleStateStore>();
+builder.Services.AddSingleton<IAccountService, PersistentAccountService>();
+var cachingSection = builder.Configuration.GetSection("Caching");
+builder.Services.Configure<CachingOptions>(cachingSection);
+var caching = cachingSection.Get<CachingOptions>() ?? new CachingOptions();
+if (caching.Provider == CacheProvider.Redis && !string.IsNullOrWhiteSpace(caching.RedisConnectionString))
+{
+    builder.Services.AddStackExchangeRedisCache(options => options.Configuration = caching.RedisConnectionString);
+}
+else
+{
+    builder.Services.AddDistributedMemoryCache();
+}
+
 builder.Services.AddSignalR();
 builder.Services.AddResponseCompression();
 builder.Services.AddEndpointsApiExplorer();
@@ -28,6 +99,8 @@ builder.Services.AddCors(options =>
             .SetIsOriginAllowed(_ => true);
     });
 });
+builder.Services.Configure<DeveloperModeOptions>(builder.Configuration.GetSection("DeveloperMode"));
+builder.Services.AddSingleton<DeveloperModeBootstrapper>();
 
 var app = builder.Build();
 
@@ -53,6 +126,37 @@ app.MapGet("/health", async (IEnumerable<IModuleContract> modules, CancellationT
 });
 
 app.MapGet("/modules", (ModuleCatalog catalog) => Results.Ok(catalog.List()));
+app.MapGet("/dashboard/views", (DashboardViewCatalog catalog) => Results.Ok(catalog.List()));
+app.MapGet("/dashboard/view-documents", (HttpRequest request, ModuleViewCatalog catalog) =>
+{
+    string? userId = null;
+    var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var (key, value) in request.Query)
+    {
+        if (string.Equals(key, "userId", StringComparison.OrdinalIgnoreCase))
+        {
+            userId = value;
+            continue;
+        }
+
+        if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+        {
+            parameters[key] = value!;
+        }
+    }
+
+    var context = new ModuleViewContext(string.IsNullOrWhiteSpace(userId) ? null : userId,
+        parameters.Count == 0 ? null : parameters);
+    return Results.Ok(catalog.List(context));
+});
+app.MapGet("/runtime/config", (IOptions<DeveloperModeOptions> options) =>
+{
+    var opt = options.Value;
+    var descriptor = opt.AutoLogin
+        ? new DeveloperAutoLoginDescriptor(opt.Email, opt.Password, opt.DisplayName)
+        : null;
+    return Results.Ok(new RuntimeConfigResponse(true, opt.AutoLogin, descriptor));
+});
 
 var developer = app.MapGroup("/developer");
 developer.AddEndpointFilter<DeveloperAuthEndpointFilter>();
@@ -90,16 +194,40 @@ developer.MapPost("/profiles",
     });
 
 var accountsApi = app.MapGroup("/accounts");
-accountsApi.MapPost("/users", async (CreateUserRequest request, IAccountService accounts, CancellationToken token) =>
+accountsApi.MapPost("/users", async (RegisterUserRequest request, IAccountService accounts, CancellationToken token) =>
 {
-    if (string.IsNullOrWhiteSpace(request.DisplayName))
+    if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password) ||
+        string.IsNullOrWhiteSpace(request.DisplayName))
     {
-        return Results.BadRequest(new AccountError(AccountErrorCodes.ValidationFailed, "Display name is required."));
+        return Results.BadRequest(new AccountError(AccountErrorCodes.ValidationFailed,
+            "Email, password, and display name are required."));
     }
 
-    var user = await accounts.CreateUserAsync(request.DisplayName, token).ConfigureAwait(false);
-    return Results.Created($"/accounts/users/{user.Id}", user);
+    try
+    {
+        var user = await accounts.RegisterUserAsync(request.Email, request.Password, request.DisplayName, token)
+            .ConfigureAwait(false);
+        return Results.Created($"/accounts/users/{user.Id}", user);
+    }
+    catch (AccountOperationException ex)
+    {
+        return Results.BadRequest(new AccountError(ex.Code, ex.Message));
+    }
 });
+
+accountsApi.MapPost("/authenticate",
+    async (AuthenticateUserRequest request, IAccountService accounts, CancellationToken token) =>
+    {
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+        {
+            return Results.BadRequest(new AccountError(AccountErrorCodes.ValidationFailed,
+                "Email and password are required."));
+        }
+
+        var user = await accounts.AuthenticateAsync(request.Email, request.Password, token)
+            .ConfigureAwait(false);
+        return user is null ? Results.Unauthorized() : Results.Ok(user);
+    });
 
 accountsApi.MapGet("/users/{userId}", async (string userId, IAccountService accounts, CancellationToken token) =>
 {
@@ -109,12 +237,12 @@ accountsApi.MapGet("/users/{userId}", async (string userId, IAccountService acco
         : Results.Ok(user);
 });
 
-accountsApi.MapGet("/users/{userId}/accounts",
+accountsApi.MapGet("/users/{userId}/universes",
     async (string userId, IAccountService accounts, CancellationToken token) =>
     {
         try
         {
-            var snapshot = await accounts.ListAccountsAsync(userId, token).ConfigureAwait(false);
+            var snapshot = await accounts.ListUniversesAsync(userId, token).ConfigureAwait(false);
             return Results.Ok(snapshot);
         }
         catch (AccountOperationException ex) when (ex.Code == AccountErrorCodes.UserNotFound)
@@ -123,61 +251,149 @@ accountsApi.MapGet("/users/{userId}/accounts",
         }
     });
 
-accountsApi.MapPost("/users/{userId}/accounts",
-    async (string userId, CreateAccountRequest request, IAccountService accounts, CancellationToken token) =>
+accountsApi.MapPost("/users/{userId}/universes",
+    async (string userId, CreateUniverseRequest request, IAccountService accounts, CancellationToken token) =>
     {
-        if (string.IsNullOrWhiteSpace(request.Label))
+        if (string.IsNullOrWhiteSpace(request.Name))
         {
-            return Results.BadRequest(new AccountError(AccountErrorCodes.ValidationFailed, "Label is required."));
+            return Results.BadRequest(new AccountError(AccountErrorCodes.ValidationFailed, "Name is required."));
         }
 
         try
         {
-            var account = await accounts.CreateAccountAsync(userId, request.Label, token).ConfigureAwait(false);
-            return Results.Created($"/accounts/accounts/{account.Id}", account);
+            var universe = await accounts.CreateUniverseAsync(userId, request.Name, token).ConfigureAwait(false);
+            return Results.Created($"/accounts/universes/{universe.Id}", universe);
         }
         catch (AccountOperationException ex) when (ex.Code is AccountErrorCodes.UserNotFound)
         {
             return Results.NotFound(new AccountError(ex.Code, ex.Message));
         }
-        catch (AccountOperationException ex) when (ex.Code is AccountErrorCodes.AccountLimit)
+        catch (AccountOperationException ex) when (ex.Code is AccountErrorCodes.UniverseLimit)
         {
             return Results.Conflict(new AccountError(ex.Code, ex.Message));
         }
     });
 
-accountsApi.MapGet("/accounts/{accountId}/profiles",
-    async (string accountId, IAccountService accounts, CancellationToken token) =>
+accountsApi.MapGet("/universes/{universeId}/characters",
+    async (string universeId, IAccountService accounts, CancellationToken token) =>
     {
-        var account = await accounts.GetAccountAsync(accountId, token).ConfigureAwait(false);
-        if (account is null)
+        var universe = await accounts.GetUniverseAsync(universeId, token).ConfigureAwait(false);
+        if (universe is null)
         {
-            return Results.NotFound(new AccountError(AccountErrorCodes.AccountNotFound,
-                $"Account '{accountId}' was not found."));
+            return Results.NotFound(new AccountError(AccountErrorCodes.UniverseNotFound,
+                $"Universe '{universeId}' was not found."));
         }
 
-        var profiles = await accounts.ListProfilesAsync(accountId, token).ConfigureAwait(false);
-        return Results.Ok(profiles);
+        var characters = await accounts.ListCharactersAsync(universeId, token).ConfigureAwait(false);
+        return Results.Ok(characters);
     });
 
-accountsApi.MapPost("/accounts/{accountId}/profiles",
-    async (string accountId, CreateProfileRequest request, IAccountService accounts, CancellationToken token) =>
+accountsApi.MapPost("/universes/{universeId}/characters",
+    async (string universeId, CreateCharacterRequest request, IAccountService accounts, CancellationToken token) =>
     {
         try
         {
-            var profile = await accounts.CreateProfileAsync(accountId, request.Name, request.SpriteAssetId, token)
+            var character = await accounts.CreateCharacterAsync(universeId, request.Name, request.SpriteAssetId, token)
                 .ConfigureAwait(false);
-            return Results.Created($"/accounts/profiles/{profile.Id}", profile);
+            return Results.Created($"/accounts/characters/{character.Id}", character);
         }
-        catch (AccountOperationException ex) when (ex.Code == AccountErrorCodes.AccountNotFound)
+        catch (AccountOperationException ex) when (ex.Code == AccountErrorCodes.UniverseNotFound)
         {
             return Results.NotFound(new AccountError(ex.Code, ex.Message));
         }
-        catch (AccountOperationException ex) when (ex.Code == AccountErrorCodes.ProfileLimit)
+        catch (AccountOperationException ex) when (ex.Code == AccountErrorCodes.CharacterLimit)
         {
             return Results.Conflict(new AccountError(ex.Code, ex.Message));
         }
     });
+
+accountsApi.MapGet("/users/{userId}/wallets",
+    async (string userId, IAccountService accounts, CancellationToken token) =>
+    {
+        try
+        {
+            var snapshot = await accounts.GetWalletSnapshotAsync(userId, token).ConfigureAwait(false);
+            return Results.Ok(snapshot);
+        }
+        catch (AccountOperationException ex) when (ex.Code == AccountErrorCodes.UserNotFound)
+        {
+            return Results.NotFound(new AccountError(ex.Code, ex.Message));
+        }
+    });
+
+accountsApi.MapPost("/users/{userId}/wallets/deposit",
+    async (string userId, WalletDepositRequest request, IAccountService accounts, CancellationToken token) =>
+    {
+        if (request.BaseCurrency < 0 || request.PremiumCurrency < 0)
+        {
+            return Results.BadRequest(new AccountError(AccountErrorCodes.ValidationFailed,
+                "Currency grants must be non-negative."));
+        }
+
+        try
+        {
+            var snapshot = await accounts
+                .DepositCurrencyAsync(userId, request.UniverseId, request.CharacterId, request.BaseCurrency,
+                    request.PremiumCurrency, token)
+                .ConfigureAwait(false);
+            return Results.Ok(snapshot);
+        }
+        catch (AccountOperationException ex) when (ex.Code is AccountErrorCodes.UserNotFound
+                                                       or AccountErrorCodes.UniverseNotFound
+                                                       or AccountErrorCodes.CharacterNotFound
+                                                       or AccountErrorCodes.WalletUnavailable)
+        {
+            return ex.Code switch
+            {
+                AccountErrorCodes.UserNotFound => Results.NotFound(new AccountError(ex.Code, ex.Message)),
+                AccountErrorCodes.UniverseNotFound => Results.NotFound(new AccountError(ex.Code, ex.Message)),
+                AccountErrorCodes.CharacterNotFound => Results.NotFound(new AccountError(ex.Code, ex.Message)),
+                AccountErrorCodes.WalletUnavailable => Results.Conflict(new AccountError(ex.Code, ex.Message)),
+                _ => Results.BadRequest(new AccountError(ex.Code, ex.Message))
+            };
+        }
+    });
+
+var statisticsApi = app.MapGroup("/statistics");
+statisticsApi.MapGet("/", (IStatisticsService statistics) =>
+{
+    var snapshot = statistics.SnapshotStatistics();
+    return Results.Ok(StatisticsResponseFactory.CreateSnapshot(snapshot));
+});
+
+statisticsApi.MapPost("/skills/activate", (ActivateStatisticSkillRequest request, IStatisticsService statistics) =>
+{
+    if (string.IsNullOrWhiteSpace(request.SkillId))
+    {
+        return Results.BadRequest(new { error = "SkillId is required." });
+    }
+
+    try
+    {
+        statistics.ActivateSkill(request.SkillId);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
+
+    var snapshot = statistics.SnapshotStatistics();
+    return Results.Ok(StatisticsResponseFactory.CreateSnapshot(snapshot));
+});
+
+var assetsApi = app.MapGroup("/assets");
+assetsApi.MapGet("/sprites", (SpriteLibrary sprites) =>
+{
+    var payload = sprites.List().Select(SpriteResponseFactory.Create);
+    return Results.Ok(payload);
+});
+
+assetsApi.MapGet("/sprites/{*spriteId}", (string spriteId, SpriteLibrary sprites) =>
+{
+    return sprites.TryGet(spriteId, out var definition)
+        ? Results.Ok(SpriteResponseFactory.Create(definition))
+        : Results.NotFound();
+});
 
 app.MapPost("/telemetry/errors", (ClientErrorReport report, HttpContext context, ILoggerFactory loggerFactory) =>
 {
@@ -244,4 +460,10 @@ app.MapPost("/sessions/{sessionId}/leave", async (string sessionId, SessionJoinR
 
 app.MapHub<SimulationHub>("/hubs/simulation");
 
-app.Run();
+using (var scope = app.Services.CreateScope())
+{
+    var bootstrapper = scope.ServiceProvider.GetRequiredService<DeveloperModeBootstrapper>();
+    await bootstrapper.InitializeAsync().ConfigureAwait(false);
+}
+
+await app.RunAsync().ConfigureAwait(false);

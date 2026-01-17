@@ -15,6 +15,11 @@ builder.Services.AddScoped<SessionClient>();
 builder.Services.AddScoped<RenderLoopService>();
 builder.Services.AddScoped<DeveloperToolsClient>();
 builder.Services.AddScoped<AccountClient>();
+builder.Services.AddScoped<SpriteLibraryClient>();
+builder.Services.AddScoped<StatisticsClient>();
+builder.Services.AddScoped<DashboardLayoutClient>();
+builder.Services.AddScoped<ModuleViewClient>();
 builder.Services.AddScoped<ClientErrorReporter>();
+builder.Services.AddScoped<RuntimeConfigClient>();
 
 await builder.Build().RunAsync().ConfigureAwait(false);

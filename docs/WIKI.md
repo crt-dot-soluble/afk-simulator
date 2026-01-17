@@ -42,7 +42,7 @@
 ## Database & Caching
 - **Default SQLite**: Local developer sessions write to `App_Data/engine.dev.db` through Entity Framework Core. The database is auto-created on launch, so you only need to ensure the `App_Data` folder is writable.
 - **Supabase/Postgres**: Point `Database:Provider` to `Supabase` (or `PostgreSql`) in `appsettings.Development.json` or user secrets, then set `Database:Supabase:ConnectionString` to the URI from the Supabase dashboard. The hosted Postgres endpoint persists accounts, universes, characters, and module payloads so multiple clients can share the same data.
-- **ModuleStateStore**: The new `ModuleStateStore` table captures JSON blobs for each module (statistics, render settings, future systems). Mission Control and `/devtools` reload seamlessly after restarts because their state now comes from the database rather than in-memory caches.
+- **ModuleStateStore**: The new `ModuleStateStore` table captures JSON blobs for each module (statistics, render settings, future systems). Mission Control and `/devtools` reload seamlessly after restarts because their state now comes from the database rather than in-memory caches, and writes are serialized so SQLite never hits the "database is locked" ceiling when multiple modules persist on the same tick.
 - **Caching provider**: `Caching:Provider` defaults to `Memory`, but supplying a `RedisConnectionString` flips the server to StackExchange.Redis for read-heavy endpoints. This keeps Supabase calls lean while leaving headroom for future cache invalidation strategies.
 
 ## Repository Tooling

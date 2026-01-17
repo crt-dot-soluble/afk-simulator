@@ -1,7 +1,19 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Engine.Server.Models;
 
-internal sealed record CreateUserRequest(string DisplayName);
+[SuppressMessage("Performance", "CA1812", Justification = "Instantiated by ASP.NET Core model binding.")]
+internal sealed record RegisterUserRequest(string Email, string Password, string DisplayName);
 
-internal sealed record CreateAccountRequest(string Label);
+[SuppressMessage("Performance", "CA1812", Justification = "Instantiated by ASP.NET Core model binding.")]
+internal sealed record AuthenticateUserRequest(string Email, string Password);
 
-internal sealed record CreateProfileRequest(string? Name, string? SpriteAssetId);
+[SuppressMessage("Performance", "CA1812", Justification = "Instantiated by ASP.NET Core model binding.")]
+internal sealed record CreateUniverseRequest(string Name);
+
+[SuppressMessage("Performance", "CA1812", Justification = "Instantiated by ASP.NET Core model binding.")]
+internal sealed record CreateCharacterRequest(string? Name, string? SpriteAssetId);
+
+[SuppressMessage("Performance", "CA1812", Justification = "Instantiated by ASP.NET Core model binding.")]
+internal sealed record WalletDepositRequest(long BaseCurrency, long PremiumCurrency, string? UniverseId,
+    string? CharacterId);

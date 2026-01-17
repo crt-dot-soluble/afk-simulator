@@ -6,7 +6,7 @@ using Engine.Core.DeveloperTools;
 
 namespace Engine.Core.Tests.DeveloperTools;
 
-public sealed class ModuleExplorerTests
+internal sealed class ModuleExplorerTests
 {
     [Fact]
     public async Task UpdatesPropertyAndExecutesCommands()

@@ -56,6 +56,10 @@ Owner:github-actions
 Links:SPECIFICATION.MD#10|SPECIFICATION.MD#16|scripts/
 ChangeLog:
   - 2026-01-16T00:00:00Z: Added developer/end-user launch scripts, enforced commit/branch standards, and hardened CI plus coverage expectations
+  - 2026-01-18T00:45:00Z: Clarified FEATURE branch workflow + testing guardrails in SPECIFICATION.MD so every commit executes Release tests, launcher verification, and CI-parity steps before push.
+  - 2026-01-18T01:15:00Z: Added the standardized PR description template and .github discipline directive to SPECIFICATION.MD §10/§16.
+  - 2026-01-18T01:25:00Z: Added SPEC §10.12 instructing agents to share the GitHub compare link (main…feature/<id>) whenever a PR is requested.
+    - 2026-01-18T01:40:00Z: Added SPEC §10.13 with the standardized commit message template so every commit carries the TODO block + refs.
 Notes:Ensures one-command local runs, deterministic CI, and machine-friendly history formatting.
 ```
 
@@ -69,6 +73,7 @@ ChangeLog:
   - 2026-01-17T21:00:00Z: Added form-capable module view blocks, migrated the Universe Foundry panel to AccountModule-owned documents, and taught the Blazor shell to route action payloads/context back to modules.
   - 2026-01-17T23:00:00Z: Taught the client renderer to handle grid/action blocks, restyled module-view components, and moved the statistics overview onto the new grid document.
   - 2026-01-17T23:50:00Z: Removed legacy leaderboard/session forms, routed pilot aliases through module-view context, and wired Mission Control actions to module-owned score + session commands only.
+  - 2026-01-18T00:30:00Z: Serialized DatabaseModuleStateStore writes so Mission Control can run end-to-end without SQLite "database is locked" crashes during tick persistence.
 Notes:Tracks the fully declarative dashboard effort so every module provides its own telemetry + input surfaces without bespoke Razor.
 ```
 
